@@ -87,18 +87,20 @@ async def google_auth():
 @router.get("/callback")
 async def google_callback(
     code: str,
+    state: str,
     response: Response,
     db: AsyncSession = Depends(get_db)
 ):
     """
-    Handle Google OAuth callback.
+    Handle Google OAuth callback with CSRF protection.
     
-    Exchanges the authorization code for tokens, creates or updates the user
-    in the database, encrypts the refresh token, generates a session JWT,
-    and sets it as an HTTPOnly secure cookie.
+    Validates the state parameter, exchanges the authorization code for tokens,
+    creates or updates the user in the database, encrypts the refresh token,
+    generates a session JWT, and sets it as an HTTPOnly secure cookie.
     
     Args:
         code: Authorization code from Google OAuth.
+        state: CSRF state parameter from Google OAuth.
         response: FastAPI response object for setting cookies.
         db: Database session dependency.
         
@@ -106,6 +108,14 @@ async def google_callback(
         RedirectResponse: Redirect to frontend dashboard.
     """
     try:
+        # Validate CSRF state parameter
+        from app.auth.oauth import validate_and_consume_state
+        if not validate_and_consume_state(state):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid or expired state parameter"
+            )
+        
         # Exchange authorization code for tokens
         oauth_result = handle_oauth_callback(code)
         
@@ -146,29 +156,38 @@ async def google_callback(
         # Generate JWT session token
         session_token = create_session_token(str(user.id), user.email)
         
-        # Redirect to frontend with token in URL
-        # Frontend will set the cookie via a dedicated endpoint
+        # Create redirect response to frontend dashboard
         frontend_url = os.getenv("FRONTEND_URL", "http://localhost:5173")
+        redirect_response = RedirectResponse(url=f"{frontend_url}/dashboard")
         
-        # Redirect to frontend auth completion page with token
-        return RedirectResponse(url=f"{frontend_url}/auth/complete?token={session_token}")
+        # Set JWT as HTTPOnly cookie directly on response (not in URL)
+        is_production = os.getenv("ENVIRONMENT", "development") == "production"
+        redirect_response.set_cookie(
+            key="session_token",
+            value=session_token,
+            httponly=True,
+            secure=is_production,
+            samesite="lax",
+            max_age=7 * 24 * 60 * 60,
+            path="/"
+        )
+        
+        return redirect_response
         
     except ValueError as e:
         # OAuth or token errors
-        import traceback
-        error_details = traceback.format_exc()
-        print(f"OAuth ValueError: {str(e)}")
-        print(f"Traceback: {error_details}")
+        import structlog
+        logger = structlog.get_logger()
+        logger.error("oauth_callback_error", error=str(e), error_type="ValueError")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"OAuth callback failed: {str(e)}"
         )
     except Exception as e:
         # Database or other errors
-        import traceback
-        error_details = traceback.format_exc()
-        print(f"OAuth Exception: {str(e)}")
-        print(f"Traceback: {error_details}")
+        import structlog
+        logger = structlog.get_logger()
+        logger.error("oauth_callback_error", error=str(e), error_type=type(e).__name__)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Authentication failed: {str(e)}"

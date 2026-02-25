@@ -57,6 +57,20 @@ class TransactionResponse(TransactionBase):
     
     class Config:
         from_attributes = True  # Pydantic v2 (was orm_mode in v1)
+        json_schema_extra = {
+            "example": {
+                "id": "123e4567-e89b-12d3-a456-426614174000",
+                "user_id": "123e4567-e89b-12d3-a456-426614174001",
+                "amount": "1250.50",
+                "currency": "INR",
+                "transaction_type": "debit",
+                "merchant": "Amazon India",
+                "transaction_date": "2026-02-19T10:30:00Z",
+                "bank_name": "HDFC Bank",
+                "gmail_message_id": "18d4f2a3b5c6d7e8",
+                "created_at": "2026-02-19T10:35:00Z"
+            }
+        }
 
 
 class TransactionListResponse(BaseModel):

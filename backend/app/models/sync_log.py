@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 
 from sqlalchemy import Column, String, Integer, DateTime, ForeignKey, Index
 from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.orm import relationship
 
 from app.database import Base
 
@@ -39,6 +40,9 @@ class SyncLog(Base):
     emails_processed = Column(Integer, default=0, nullable=False)
     errors = Column(String, nullable=True)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+    
+    # Relationship
+    user = relationship("User", back_populates="sync_logs")
     
     def __repr__(self) -> str:
         return (

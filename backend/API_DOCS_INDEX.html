@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gmail Expense Tracker - API Documentation</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            overflow: hidden;
+        }
+        
+        header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 40px;
+            text-align: center;
+        }
+        
+        header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+        }
+        
+        header p {
+            font-size: 1.2em;
+            opacity: 0.9;
+        }
+        
+        .content {
+            padding: 40px;
+        }
+        
+        .section {
+            margin-bottom: 40px;
+        }
+        
+        .section h2 {
+            color: #667eea;
+            margin-bottom: 20px;
+            font-size: 1.8em;
+            border-bottom: 3px solid #667eea;
+            padding-bottom: 10px;
+        }
+        
+        .cards {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin-top: 20px;
+        }
+        
+        .card {
+            background: #f8f9fa;
+            border: 2px solid #e9ecef;
+            border-radius: 8px;
+            padding: 25px;
+            transition: all 0.3s ease;
+            text-decoration: none;
+            color: inherit;
+            display: block;
+        }
+        
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 25px rgba(102, 126, 234, 0.3);
+            border-color: #667eea;
+        }
+        
+        .card h3 {
+            color: #667eea;
+            margin-bottom: 10px;
+            font-size: 1.4em;
+        }
+        
+        .card p {
+            color: #666;
+            margin-bottom: 15px;
+        }
+        
+        .card .badge {
+            display: inline-block;
+            background: #667eea;
+            color: white;
+            padding: 5px 12px;
+            border-radius: 20px;
+            font-size: 0.85em;
+            font-weight: 600;
+        }
+        
+        .status {
+            background: #28a745;
+            color: white;
+            padding: 10px 20px;
+            border-radius: 6px;
+            display: inline-block;
+            margin-bottom: 20px;
+            font-weight: 600;
+        }
+        
+        .status.error {
+            background: #dc3545;
+        }
+        
+        .quick-links {
+            background: #e7f3ff;
+            border-left: 4px solid #667eea;
+            padding: 20px;
+            border-radius: 6px;
+            margin-top: 20px;
+        }
+        
+        .quick-links h3 {
+            color: #667eea;
+            margin-bottom: 15px;
+        }
+        
+        .quick-links ul {
+            list-style: none;
+        }
+        
+        .quick-links li {
+            margin-bottom: 10px;
+        }
+        
+        .quick-links a {
+            color: #667eea;
+            text-decoration: none;
+            font-weight: 500;
+        }
+        
+        .quick-links a:hover {
+            text-decoration: underline;
+        }
+        
+        footer {
+            background: #f8f9fa;
+            padding: 20px;
+            text-align: center;
+            color: #666;
+            border-top: 1px solid #e9ecef;
+        }
+        
+        .emoji {
+            font-size: 1.5em;
+            margin-right: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>📧 Gmail Expense Tracker API</h1>
+            <p>Automated expense tracking by analyzing Gmail transaction emails</p>
+        </header>
+        
+        <div class="content">
+            <div class="section">
+                <h2>🚀 Interactive Documentation</h2>
+                <div class="cards">
+                    <a href="http://localhost:8000/docs" class="card" target="_blank">
+                        <h3><span class="emoji">📖</span>Swagger UI</h3>
+                        <p>Interactive API testing interface. Try out endpoints directly in your browser.</p>
+                        <span class="badge">Recommended for Testing</span>
+                    </a>
+                    
+                    <a href="http://localhost:8000/redoc" class="card" target="_blank">
+                        <h3><span class="emoji">📚</span>ReDoc</h3>
+                        <p>Clean, readable API documentation. Perfect for understanding the API structure.</p>
+                        <span class="badge">Best for Reading</span>
+                    </a>
+                    
+                    <a href="http://localhost:8000/openapi.json" class="card" target="_blank">
+                        <h3><span class="emoji">⚙️</span>OpenAPI Spec</h3>
+                        <p>Raw OpenAPI JSON specification. Import into Postman, Insomnia, or other tools.</p>
+                        <span class="badge">For Developers</span>
+                    </a>
+                </div>
+            </div>
+            
+            <div class="section">
+                <h2>🏥 Health Check</h2>
+                <div class="cards">
+                    <a href="http://localhost:8000/" class="card" target="_blank">
+                        <h3><span class="emoji">💚</span>API Status</h3>
+                        <p>Check if the API is running and healthy.</p>
+                        <span class="badge">No Auth Required</span>
+                    </a>
+                    
+                    <a href="http://localhost:8000/debug/db" class="card" target="_blank">
+                        <h3><span class="emoji">🗄️</span>Database Status</h3>
+                        <p>Verify database connection and view table information.</p>
+                        <span class="badge">No Auth Required</span>
+                    </a>
+                </div>
+            </div>
+            
+            <div class="section">
+                <h2>🔐 Authentication</h2>
+                <div class="cards">
+                    <a href="http://localhost:8000/auth/google" class="card" target="_blank">
+                        <h3><span class="emoji">🔑</span>Google OAuth Login</h3>
+                        <p>Start the OAuth flow to authenticate with your Google account.</p>
+                        <span class="badge">Start Here</span>
+                    </a>
+                    
+                    <a href="http://localhost:8000/auth/me" class="card" target="_blank">
+                        <h3><span class="emoji">👤</span>My Profile</h3>
+                        <p>View your user profile information (requires authentication).</p>
+                        <span class="badge">Auth Required</span>
+                    </a>
+                </div>
+            </div>
+            
+            <div class="section">
+                <h2>📖 Documentation Files</h2>
+                <div class="quick-links">
+                    <h3>Available Guides</h3>
+                    <ul>
+                        <li>📄 <strong>SWAGGER_GUIDE.md</strong> - Complete guide to using Swagger UI for testing</li>
+                        <li>📄 <strong>API_QUICK_REFERENCE.md</strong> - Quick reference for all endpoints and examples</li>
+                        <li>📄 <strong>FIX_SUMMARY.md</strong> - Recent fixes and troubleshooting information</li>
+                    </ul>
+                </div>
+            </div>
+            
+            <div class="section">
+                <h2>🎯 Quick Start</h2>
+                <div class="quick-links">
+                    <h3>Get Started in 5 Steps</h3>
+                    <ul>
+                        <li>1️⃣ <a href="http://localhost:8000/" target="_blank">Check API health</a></li>
+                        <li>2️⃣ <a href="http://localhost:8000/debug/db" target="_blank">Verify database connection</a></li>
+                        <li>3️⃣ <a href="http://localhost:8000/auth/google" target="_blank">Login with Google</a></li>
+                        <li>4️⃣ <a href="http://localhost:8000/docs" target="_blank">Open Swagger UI</a></li>
+                        <li>5️⃣ Try <code>POST /sync/manual</code> to fetch your emails</li>
+                    </ul>
+                </div>
+            </div>
+            
+            <div class="section">
+                <h2>📊 Main Features</h2>
+                <div class="cards">
+                    <div class="card">
+                        <h3><span class="emoji">💰</span>Transactions</h3>
+                        <p>View, filter, and export your expense transactions parsed from Gmail.</p>
+                        <span class="badge">GET /transactions</span>
+                    </div>
+                    
+                    <div class="card">
+                        <h3><span class="emoji">📈</span>Analytics</h3>
+                        <p>Get spending insights, monthly trends, and category breakdowns.</p>
+                        <span class="badge">GET /analytics/*</span>
+                    </div>
+                    
+                    <div class="card">
+                        <h3><span class="emoji">🔄</span>Sync</h3>
+                        <p>Manually trigger email synchronization or view sync history.</p>
+                        <span class="badge">POST /sync/manual</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <footer>
+            <p>Gmail Expense Tracker API v1.0.0</p>
+            <p>Built with FastAPI • Running on <a href="http://localhost:8000" target="_blank">http://localhost:8000</a></p>
+        </footer>
+    </div>
+</body>
+</html>

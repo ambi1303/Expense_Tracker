@@ -181,10 +181,11 @@ async def get_category_breakdown(
     limit: int = 10
 ) -> List[CategoryDataPoint]:
     """
-    Get spending breakdown by merchant/category.
+    Get spending breakdown by merchant/category with normalized merchant names.
     
-    Aggregates debit transactions by merchant, calculating total amount,
-    transaction count, and percentage of total spending.
+    Aggregates debit transactions by merchant using case-insensitive grouping,
+    calculating total amount, transaction count, and percentage of total spending.
+    Merchant names are normalized (lowercase for grouping, capitalized for display).
     
     Args:
         db: Database session.
@@ -206,9 +207,9 @@ async def get_category_breakdown(
     total_result = await db.execute(total_query)
     total_spent = float(total_result.scalar())
     
-    # Query for category breakdown
+    # Query for category breakdown with case-insensitive merchant grouping
     query = select(
-        Transaction.merchant,
+        func.lower(Transaction.merchant).label('merchant_lower'),
         func.sum(Transaction.amount).label('amount'),
         func.count(Transaction.id).label('transaction_count')
     ).where(
@@ -218,7 +219,7 @@ async def get_category_breakdown(
             Transaction.merchant.isnot(None)
         )
     ).group_by(
-        Transaction.merchant
+        func.lower(Transaction.merchant)
     ).order_by(
         func.sum(Transaction.amount).desc()
     ).limit(limit)
@@ -226,14 +227,17 @@ async def get_category_breakdown(
     result = await db.execute(query)
     rows = result.all()
     
-    # Convert to CategoryDataPoint objects
+    # Convert to CategoryDataPoint objects with capitalized merchant names
     categories = []
     for row in rows:
         amount = float(row.amount)
         percentage = (amount / total_spent * 100) if total_spent > 0 else 0
         
+        # Capitalize merchant name for display
+        merchant_display = row.merchant_lower.capitalize()
+        
         categories.append(CategoryDataPoint(
-            merchant=row.merchant,
+            merchant=merchant_display,
             amount=Decimal(str(amount)),
             transaction_count=row.transaction_count,
             percentage=round(percentage, 2)

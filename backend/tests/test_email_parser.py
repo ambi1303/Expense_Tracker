@@ -140,17 +140,17 @@ def test_parse_email_with_malformed_date():
     """
     Test parsing email with malformed date.
     
-    **Validates: Requirements 4.9**
+    Per Requirement 4.10: Parser should return None when no valid date is found.
+    
+    **Validates: Requirements 4.9, 4.10**
     """
     subject = "Transaction Alert"
     body = "Your account has been debited with Rs 500 on invalid-date."
     
     parsed = parse_email(subject, body)
     
-    # Should still parse (uses current date as fallback)
-    assert parsed is not None
-    assert parsed.amount == Decimal("500")
-    assert parsed.transaction_date is not None
+    # Should return None because date is invalid (per Requirement 4.10)
+    assert parsed is None
 
 
 def test_debit_vs_credit_identification():

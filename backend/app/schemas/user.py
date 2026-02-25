@@ -23,6 +23,14 @@ class UserResponse(UserBase):
     
     class Config:
         from_attributes = True  # Pydantic v2 (was orm_mode in v1)
+        json_schema_extra = {
+            "example": {
+                "id": "123e4567-e89b-12d3-a456-426614174001",
+                "email": "user@example.com",
+                "name": "John Doe",
+                "created_at": "2026-02-15T08:00:00Z"
+            }
+        }
 
 
 class UserProfile(UserResponse):

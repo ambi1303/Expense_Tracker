@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 
 from sqlalchemy import Column, String, Numeric, DateTime, Enum, ForeignKey, Index
 from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.orm import relationship
 
 from app.database import Base
 
@@ -35,6 +36,10 @@ class Transaction(Base):
         transaction_date: Date when the transaction occurred
         bank_name: Name of the bank (optional)
         gmail_message_id: Unique Gmail message ID to prevent duplicates
+        category: Auto-categorized transaction category (optional)
+        payment_method: Payment method used (UPI, Card, NetBanking, etc.) (optional)
+        upi_reference: UPI transaction reference ID (optional)
+        raw_snippet: First 500 chars of email for debugging (optional)
         created_at: Timestamp when the record was created
     """
     __tablename__ = "transactions"
@@ -53,11 +58,21 @@ class Transaction(Base):
     transaction_date = Column(DateTime(timezone=True), nullable=False)
     bank_name = Column(String(255), nullable=True)
     gmail_message_id = Column(String(255), unique=True, nullable=False, index=True)
+    
+    # New fields for enhanced functionality
+    category = Column(String(100), nullable=True, index=True)
+    payment_method = Column(String(50), nullable=True)
+    upi_reference = Column(String(255), nullable=True, index=True)
+    raw_snippet = Column(String(500), nullable=True)
+    
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+    
+    # Relationship
+    user = relationship("User", back_populates="transactions")
     
     def __repr__(self) -> str:
         return (
             f"<Transaction(id={self.id}, user_id={self.user_id}, "
             f"amount={self.amount}, type={self.transaction_type}, "
-            f"merchant={self.merchant})>"
+            f"merchant={self.merchant}, category={self.category})>"
         )

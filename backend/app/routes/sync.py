@@ -5,11 +5,13 @@ This module provides endpoints for triggering manual email synchronization
 and retrieving sync history logs.
 """
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from typing import List
 from datetime import datetime
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 import structlog
 
 from app.database import get_db
@@ -22,6 +24,9 @@ from pydantic import BaseModel, Field
 
 logger = structlog.get_logger()
 router = APIRouter(prefix="/sync", tags=["sync"])
+
+# Rate limiter for manual sync endpoint
+limiter = Limiter(key_func=get_remote_address)
 
 
 class SyncResponse(BaseModel):
@@ -46,7 +51,9 @@ class SyncLogResponse(BaseModel):
 
 
 @router.post("/manual", response_model=SyncResponse)
+@limiter.limit("3/minute")  # Max 3 syncs per minute per user
 async def trigger_manual_sync(
+    request: Request,  # Required for rate limiter
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
@@ -56,6 +63,8 @@ async def trigger_manual_sync(
     Manually initiates the sync process that normally runs automatically every 15 minutes.
     This fetches new transaction emails from Gmail, parses them, and stores transactions
     in the database.
+    
+    Rate limited to 3 requests per minute to prevent abuse.
     
     Returns:
         SyncResponse with sync results including number of emails processed,

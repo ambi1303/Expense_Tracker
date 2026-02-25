@@ -8,6 +8,7 @@ the dependency injection function for FastAPI routes.
 import os
 from typing import AsyncGenerator
 from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
+from dotenv import load_dotenv
 
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
@@ -15,6 +16,9 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 from sqlalchemy.orm import declarative_base
+
+# Load environment variables - critical for uvicorn --reload mode
+load_dotenv()
 
 # Get database URL from environment
 DATABASE_URL = os.getenv("DATABASE_URL")

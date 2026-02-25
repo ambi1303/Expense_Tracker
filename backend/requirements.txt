@@ -31,6 +31,10 @@ tenacity==8.2.3
 # CORS
 python-dotenv==1.0.0
 
+# HTML Parsing
+beautifulsoup4==4.12.2
+lxml==4.9.3
+
 # Rate Limiting
 slowapi==0.1.9
 

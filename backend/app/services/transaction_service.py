@@ -20,6 +20,16 @@ from app.schemas.transaction import TransactionFilterParams
 
 logger = structlog.get_logger()
 
+# Allowed sort fields whitelist for security
+ALLOWED_SORT_FIELDS = {
+    'transaction_date',
+    'amount',
+    'merchant',
+    'bank_name',
+    'transaction_type',
+    'created_at'
+}
+
 
 async def create_transaction(
     db: AsyncSession,
@@ -86,7 +96,12 @@ async def create_transaction(
             merchant=parsed_transaction.merchant,
             transaction_date=parsed_transaction.transaction_date,
             bank_name=parsed_transaction.bank_name,
-            gmail_message_id=message_id
+            gmail_message_id=message_id,
+            # New fields
+            category=parsed_transaction.category,
+            payment_method=parsed_transaction.payment_method,
+            upi_reference=parsed_transaction.upi_reference,
+            raw_snippet=parsed_transaction.raw_snippet
         )
         
         db.add(transaction)
@@ -161,6 +176,10 @@ async def get_transactions(
         skip=skip,
         limit=limit
     )
+    
+    # Validate sort_by parameter against whitelist
+    if sort_by not in ALLOWED_SORT_FIELDS:
+        raise ValueError(f"Invalid sort_by field: {sort_by}. Allowed: {ALLOWED_SORT_FIELDS}")
     
     # Enforce maximum limit
     limit = min(limit, 100)

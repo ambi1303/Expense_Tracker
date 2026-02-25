@@ -6,6 +6,9 @@ authorization URL generation, token exchange, and token refresh.
 """
 
 import os
+import secrets
+import time
+from threading import Lock
 from typing import Dict
 from google_auth_oauthlib.flow import Flow
 from google.auth.transport.requests import Request
@@ -21,6 +24,11 @@ SCOPES = [
     'https://www.googleapis.com/auth/userinfo.email',
     'https://www.googleapis.com/auth/userinfo.profile'
 ]
+
+# In-memory CSRF state store: {state: expiration_timestamp}
+_oauth_state_store: Dict[str, float] = {}
+_state_store_lock = Lock()
+STATE_TTL_SECONDS = 600  # 10 minutes
 
 
 def get_oauth_config() -> Dict[str, str]:
@@ -53,7 +61,7 @@ def get_oauth_config() -> Dict[str, str]:
 
 def initiate_oauth_flow() -> str:
     """
-    Generate the OAuth authorization URL for Google login.
+    Generate the OAuth authorization URL for Google login with CSRF protection.
     
     Returns:
         str: The authorization URL to redirect the user to.
@@ -81,14 +89,67 @@ def initiate_oauth_flow() -> str:
         redirect_uri=config["redirect_uri"]
     )
     
-    # Generate authorization URL
+    # Generate cryptographically secure state parameter for CSRF protection
+    state = secrets.token_urlsafe(32)
+    
+    # Store state with expiration timestamp
+    with _state_store_lock:
+        _oauth_state_store[state] = time.time() + STATE_TTL_SECONDS
+    
+    # Generate authorization URL with state parameter
     authorization_url, _ = flow.authorization_url(
         access_type='offline',  # Request refresh token
         include_granted_scopes='true',
-        prompt='consent'  # Force consent screen to get refresh token
+        prompt='consent',  # Force consent screen to get refresh token
+        state=state  # Add CSRF state parameter
     )
     
     return authorization_url
+
+
+def validate_and_consume_state(state: str) -> bool:
+    """
+    Validate OAuth state parameter and remove from store (consume).
+    
+    This function checks if the state exists, hasn't expired, and removes it
+    to prevent replay attacks.
+    
+    Args:
+        state: The state parameter to validate.
+        
+    Returns:
+        bool: True if state is valid, False otherwise.
+    """
+    if not state:
+        return False
+    
+    with _state_store_lock:
+        # Check if state exists
+        if state not in _oauth_state_store:
+            return False
+        
+        # Check if expired
+        if time.time() > _oauth_state_store[state]:
+            del _oauth_state_store[state]
+            return False
+        
+        # Valid state - consume it (remove from store to prevent replay)
+        del _oauth_state_store[state]
+        return True
+
+
+def cleanup_expired_states():
+    """
+    Remove expired states from store.
+    
+    This function should be called periodically to prevent memory leaks
+    from expired but unconsumed states.
+    """
+    with _state_store_lock:
+        current_time = time.time()
+        expired = [s for s, exp in _oauth_state_store.items() if current_time > exp]
+        for state in expired:
+            del _oauth_state_store[state]
 
 
 def handle_oauth_callback(code: str) -> Dict[str, str]:
@@ -210,3 +271,29 @@ def refresh_access_token(refresh_token: str) -> str:
         
     except Exception as e:
         raise ValueError(f"Token refresh failed: {str(e)}")
+
+
+async def refresh_access_token_async(refresh_token: str) -> str:
+    """
+    Async wrapper for token refresh to avoid blocking the event loop.
+    
+    Wraps the synchronous refresh_access_token function with run_in_executor
+    to prevent blocking the FastAPI event loop during token refresh operations.
+    
+    Args:
+        refresh_token: The refresh token to use for obtaining a new access token.
+        
+    Returns:
+        str: The new access token.
+        
+    Raises:
+        ValueError: If refresh_token is empty or token refresh fails.
+        RequestException: If network request fails after retries.
+    """
+    import asyncio
+    from concurrent.futures import ThreadPoolExecutor
+    
+    loop = asyncio.get_event_loop()
+    executor = ThreadPoolExecutor(max_workers=5)
+    
+    return await loop.run_in_executor(executor, refresh_access_token, refresh_token)
