@@ -132,6 +132,28 @@ Run property-based tests:
 pytest tests/test_property_*.py
 ```
 
+## Troubleshooting
+
+### `column transactions.account_label does not exist` (500 on GET /transactions)
+
+If you see this error, the database is missing the `account_label` column. Run the fix script:
+
+```bash
+cd backend
+python scripts/fix_account_label_column.py
+```
+
+This adds the `account_label` column and creates the `budgets` table if missing. Alternatively, run the SQL directly:
+
+```bash
+cd backend
+psql -U your_user -d your_db -f scripts/fix_add_account_label.sql
+```
+
+### Alembic migration issues
+
+If migrations fail or you have an out-of-sync DB, you can run the fix script above to add missing columns and tables without using Alembic.
+
 ## License
 
 MIT

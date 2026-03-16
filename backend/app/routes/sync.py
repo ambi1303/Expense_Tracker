@@ -15,7 +15,7 @@ from slowapi.util import get_remote_address
 import os
 import structlog
 
-from app.database import get_db
+from app.database import get_db, AsyncSessionLocal
 from app.auth.middleware import get_current_user
 from app.models.user import User
 from app.models.sync_log import SyncLog
@@ -73,9 +73,10 @@ async def trigger_manual_sync(
         SyncResponse with sync results including number of emails processed,
         transactions created, and any error messages.
     """
+    user_id = current_user.id  # Capture before long operation (avoid lazy load in except)
     logger.info(
         "manual_sync_triggered",
-        user_id=str(current_user.id),
+        user_id=str(user_id),
         from_date=from_date,
         full_sync=full_sync
     )
@@ -91,7 +92,7 @@ async def trigger_manual_sync(
         
         # Create sync log entry
         sync_log = SyncLog(
-            user_id=current_user.id,
+            user_id=user_id,
             status="success" if sync_result['success'] else "failed",
             emails_processed=sync_result['emails_processed'],
             errors=sync_result['error']
@@ -101,7 +102,7 @@ async def trigger_manual_sync(
         
         logger.info(
             "manual_sync_completed",
-            user_id=str(current_user.id),
+            user_id=str(user_id),
             success=sync_result['success'],
             emails_processed=sync_result['emails_processed'],
             transactions_created=sync_result['transactions_created']
@@ -121,22 +122,28 @@ async def trigger_manual_sync(
         )
         
     except Exception as e:
+        # Rollback any invalid transaction before doing anything else
+        try:
+            await db.rollback()
+        except Exception:
+            pass
         logger.error(
             "manual_sync_error",
-            user_id=str(current_user.id),
+            user_id=str(user_id),
             error=str(e)
         )
         
-        # Try to create error log
+        # Try to create error log with a fresh session (request session may be broken)
         try:
-            sync_log = SyncLog(
-                user_id=current_user.id,
-                status="failed",
-                emails_processed=0,
-                errors=str(e)
-            )
-            db.add(sync_log)
-            await db.commit()
+            async with AsyncSessionLocal() as log_session:
+                sync_log = SyncLog(
+                    user_id=user_id,
+                    status="failed",
+                    emails_processed=0,
+                    errors=str(e)
+                )
+                log_session.add(sync_log)
+                await log_session.commit()
         except Exception:
             pass
         

@@ -1,13 +1,30 @@
-import React from 'react';
-import { Transaction } from '../../types';
+import React, { useState } from 'react';
+import { Transaction, CATEGORIES } from '../../types';
 import { format } from 'date-fns';
 import { getCurrencySymbol } from '../../utils/currency';
+import api from '../../services/api';
 
 interface TransactionTableProps {
   transactions: Transaction[];
+  onTransactionUpdated?: () => void;
 }
 
-const TransactionTable: React.FC<TransactionTableProps> = ({ transactions }) => {
+const TransactionTable: React.FC<TransactionTableProps> = ({ transactions, onTransactionUpdated }) => {
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  const handleCategoryChange = async (id: string, category: string | null) => {
+    if (saving) return;
+    setSaving(true);
+    try {
+      await api.patch(`/transactions/${id}`, { category: category || null });
+      onTransactionUpdated?.();
+    } finally {
+      setSaving(false);
+      setEditingId(null);
+    }
+  };
+
   return (
     <div className="bg-white dark:bg-gray-800 rounded-lg shadow border border-gray-200 dark:border-gray-700 overflow-hidden">
       <div className="overflow-x-auto">
@@ -25,6 +42,9 @@ const TransactionTable: React.FC<TransactionTableProps> = ({ transactions }) => 
               </th>
               <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
                 Account / Card
+              </th>
+              <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                Category
               </th>
               <th scope="col" className="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
                 Amount
@@ -55,6 +75,31 @@ const TransactionTable: React.FC<TransactionTableProps> = ({ transactions }) => 
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
                     {transaction.account_label || transaction.bank_name || 'N/A'}
                   </td>
+                  <td className="px-6 py-4 whitespace-nowrap">
+                    {editingId === transaction.id ? (
+                      <select
+                        autoFocus
+                        value={transaction.category || ''}
+                        onChange={(e) => handleCategoryChange(transaction.id, e.target.value || null)}
+                        onBlur={() => setEditingId(null)}
+                        disabled={saving}
+                        className="text-sm border border-gray-300 dark:border-gray-600 rounded px-2 py-1 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                      >
+                        <option value="">—</option>
+                        {CATEGORIES.map((c) => (
+                          <option key={c} value={c}>{c}</option>
+                        ))}
+                      </select>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => setEditingId(transaction.id)}
+                        className="text-sm text-gray-700 dark:text-gray-300 hover:underline"
+                      >
+                        {transaction.category || 'Set category'}
+                      </button>
+                    )}
+                  </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-right font-medium">
                     <span
                       className={
@@ -75,7 +120,7 @@ const TransactionTable: React.FC<TransactionTableProps> = ({ transactions }) => 
               ))
             ) : (
               <tr>
-                <td colSpan={5} className="px-6 py-8 text-center text-gray-500 dark:text-gray-400">
+                <td colSpan={6} className="px-6 py-8 text-center text-gray-500 dark:text-gray-400">
                   No transactions found
                 </td>
               </tr>

@@ -5,6 +5,13 @@ export interface User {
   created_at: string;
 }
 
+export const CATEGORIES = [
+  'Food', 'Groceries', 'Shopping', 'Transport', 'Bills',
+  'Entertainment', 'Healthcare', 'Education', 'Other'
+] as const;
+
+export type Category = typeof CATEGORIES[number];
+
 export interface Transaction {
   id: string;
   user_id: string;
@@ -14,8 +21,9 @@ export interface Transaction {
   merchant: string | null;
   transaction_date: string;
   bank_name: string | null;
-  account_label: string | null;  // e.g. "HDFC Credit Card", "ICICI Savings"
-  gmail_message_id: string;
+  account_label: string | null;
+  category: string | null;
+  gmail_message_id?: string;
   created_at: string;
 }
 

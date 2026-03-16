@@ -27,6 +27,8 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
     { name: 'Dashboard', href: '/dashboard', icon: '📊' },
     { name: 'Add Data', href: '/import', icon: '📥' },
     { name: 'Transactions', href: '/transactions', icon: '💳' },
+    { name: 'Budgets', href: '/budgets', icon: '💰' },
+    { name: 'Duplicates', href: '/duplicates', icon: '🔄' },
     { name: 'Settings', href: '/settings', icon: '⚙️' },
   ];
 

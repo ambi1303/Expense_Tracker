@@ -57,13 +57,12 @@ async def sync_user_emails(
     Sync emails for a single user with incremental sync and concurrency control.
 
     Fetches transaction emails from Gmail, parses them, and stores transactions
-    in the database. By default uses last successful sync time. Can override with
-    from_date (YYYY-MM-DD) or full_sync=True to fetch all emails (e.g. after
-    database wipe).
+    in the database. Uses a fresh DB session for work after the Gmail fetch to
+    avoid connection timeout during long fetches (7k+ emails can take minutes).
 
     Args:
         user: User object to sync emails for.
-        session: Database session.
+        session: Database session (used only for initial last_sync query).
         from_date: Optional date string (YYYY-MM-DD). If set, fetch emails from this date.
         full_sync: If True, fetch all emails (no date filter). Use after clearing data.
 
@@ -75,13 +74,14 @@ async def sync_user_emails(
             'error': str or None
         }
     """
-    logger.info("sync_user_emails_started", user_id=str(user.id), email=user.email)
+    user_id = user.id  # Capture for use after long operations
+    logger.info("sync_user_emails_started", user_id=str(user_id), email=user.email)
     
     # Acquire user-specific lock to prevent concurrent syncs
-    lock = await get_user_sync_lock(user.id)
+    lock = await get_user_sync_lock(user_id)
     
     if lock.locked():
-        logger.warning("sync_already_in_progress", user_id=str(user.id))
+        logger.warning("sync_already_in_progress", user_id=str(user_id))
         return {
             'success': False,
             'emails_processed': 0,
@@ -95,106 +95,107 @@ async def sync_user_emails(
             refresh_token = decrypt_refresh_token(user.refresh_token_encrypted)
             access_token = await refresh_access_token_async(refresh_token)
             
-            logger.info("access_token_refreshed", user_id=str(user.id))
+            logger.info("access_token_refreshed", user_id=str(user_id))
             
-            # Determine which date to use for Gmail fetch
+            # Determine which date to use for Gmail fetch (quick DB query)
             if full_sync:
                 sync_time_used = None
-                logger.info("full_sync_requested", user_id=str(user.id))
+                logger.info("full_sync_requested", user_id=str(user_id))
             elif from_date:
                 try:
                     parsed = datetime.strptime(from_date.strip(), "%Y-%m-%d")
                     sync_time_used = parsed.replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=timezone.utc)
-                    logger.info("from_date_override", user_id=str(user.id), from_date=from_date)
+                    logger.info("from_date_override", user_id=str(user_id), from_date=from_date)
                 except ValueError:
                     logger.warning("invalid_from_date", from_date=from_date)
                     sync_time_used = None
             else:
                 last_sync_query = select(SyncLog.created_at).where(
                     and_(
-                        SyncLog.user_id == user.id,
+                        SyncLog.user_id == user_id,
                         SyncLog.status == "success"
                     )
                 ).order_by(SyncLog.created_at.desc()).limit(1)
                 result = await session.execute(last_sync_query)
                 sync_time_used = result.scalar_one_or_none()
-                logger.info("last_sync_time_queried", user_id=str(user.id), last_sync_time=sync_time_used)
+                logger.info("last_sync_time_queried", user_id=str(user_id), last_sync_time=sync_time_used)
 
-            # Fetch emails from Gmail
+            # Fetch emails from Gmail (can take minutes for 7k+ emails - no DB session used)
             emails = await fetch_transaction_emails(access_token, sync_time_used)
             
             logger.info(
                 "emails_fetched",
-                user_id=str(user.id),
+                user_id=str(user_id),
                 email_count=len(emails)
             )
             
-            # Get already processed message IDs
-            processed_ids = await get_processed_message_ids(session, user.id)
-            
-            # Filter out already processed emails
-            new_emails = [e for e in emails if e['message_id'] not in processed_ids]
-            
-            logger.info(
-                "emails_filtered",
-                user_id=str(user.id),
-                new_emails=len(new_emails),
-                already_processed=len(emails) - len(new_emails)
-            )
-            
-            # Process each new email
-            transactions_created = 0
-            emails_processed = 0
-            
-            for email in new_emails:
-                try:
-                    parsed_list = parse_emails(
-                        email.get('subject', ''),
-                        email.get('body', '')
-                    )
-                    
-                    for i, parsed in enumerate(parsed_list):
-                        # Use message_id for first; message_id_0, message_id_1 for multiples
-                        msg_id = email['message_id'] if i == 0 else f"{email['message_id']}_{i}"
-                        transaction = await create_transaction(
-                            db=session,
-                            user_id=user.id,
-                            parsed_transaction=parsed,
-                            message_id=msg_id
+            # Use a FRESH session for DB work after long fetch - avoids "connection is closed"
+            async with AsyncSessionLocal() as db:
+                processed_ids = await get_processed_message_ids(db, user_id)
+                
+                # Filter out already processed emails
+                new_emails = [e for e in emails if e['message_id'] not in processed_ids]
+                
+                logger.info(
+                    "emails_filtered",
+                    user_id=str(user_id),
+                    new_emails=len(new_emails),
+                    already_processed=len(emails) - len(new_emails)
+                )
+                
+                # Process each new email
+                transactions_created = 0
+                emails_processed = 0
+                
+                for email in new_emails:
+                    try:
+                        parsed_list = parse_emails(
+                            email.get('subject', ''),
+                            email.get('body', '')
                         )
-                        if transaction:
-                            transactions_created += 1
-                            logger.info(
-                                "transaction_created",
-                                user_id=str(user.id),
-                                transaction_id=str(transaction.id),
+                        
+                        for i, parsed in enumerate(parsed_list):
+                            # Use message_id for first; message_id_0, message_id_1 for multiples
+                            msg_id = email['message_id'] if i == 0 else f"{email['message_id']}_{i}"
+                            transaction = await create_transaction(
+                                db=db,
+                                user_id=user_id,
+                                parsed_transaction=parsed,
                                 message_id=msg_id
                             )
-                        else:
-                            logger.warning(
-                                "transaction_duplicate_skipped",
-                                user_id=str(user.id),
-                                message_id=msg_id
-                            )
-                    
-                    emails_processed += 1
-                    
-                except Exception as e:
-                    logger.error(
-                        "email_processing_error",
-                        user_id=str(user.id),
-                        message_id=email.get('message_id'),
-                        error=str(e)
-                    )
-                    # Continue processing other emails
-                    continue
-            
-            logger.info(
-                "sync_user_emails_success",
-                user_id=str(user.id),
-                emails_processed=emails_processed,
-                transactions_created=transactions_created
-            )
+                            if transaction:
+                                transactions_created += 1
+                                logger.info(
+                                    "transaction_created",
+                                    user_id=str(user_id),
+                                    transaction_id=str(transaction.id),
+                                    message_id=msg_id
+                                )
+                            else:
+                                logger.warning(
+                                    "transaction_duplicate_skipped",
+                                    user_id=str(user_id),
+                                    message_id=msg_id
+                                )
+                        
+                        emails_processed += 1
+                        
+                    except Exception as e:
+                        logger.error(
+                            "email_processing_error",
+                            user_id=str(user_id),
+                            message_id=email.get('message_id'),
+                            error=str(e)
+                        )
+                        # Continue processing other emails
+                        continue
+                
+                logger.info(
+                    "sync_user_emails_success",
+                    user_id=str(user_id),
+                    emails_processed=emails_processed,
+                    transactions_created=transactions_created
+                )
             
             return {
                 'success': True,
@@ -206,7 +207,7 @@ async def sync_user_emails(
         except Exception as e:
             logger.error(
                 "sync_user_emails_failed",
-                user_id=str(user.id),
+                user_id=str(user_id),
                 error=str(e)
             )
             

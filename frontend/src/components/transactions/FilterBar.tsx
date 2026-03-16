@@ -5,6 +5,7 @@ interface FilterBarProps {
     type: string;
     merchant: string;
     accountLabel: string;
+    category: string;
     startDate: string;
     endDate: string;
   };
@@ -15,7 +16,7 @@ interface FilterBarProps {
 const FilterBar: React.FC<FilterBarProps> = ({ filters, onFilterChange, onReset }) => {
   return (
     <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6 border border-gray-200 dark:border-gray-700">
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-4">
         <div>
           <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
             Transaction Type
@@ -55,6 +56,28 @@ const FilterBar: React.FC<FilterBarProps> = ({ filters, onFilterChange, onReset 
             placeholder="HDFC Credit Card, ICICI..."
             className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 focus:ring-2 focus:ring-primary-500"
           />
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+            Category
+          </label>
+          <select
+            value={filters.category}
+            onChange={(e) => onFilterChange('category', e.target.value)}
+            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500"
+          >
+            <option value="">All</option>
+            <option value="Food">Food</option>
+            <option value="Groceries">Groceries</option>
+            <option value="Shopping">Shopping</option>
+            <option value="Transport">Transport</option>
+            <option value="Bills">Bills</option>
+            <option value="Entertainment">Entertainment</option>
+            <option value="Healthcare">Healthcare</option>
+            <option value="Education">Education</option>
+            <option value="Other">Other</option>
+          </select>
         </div>
 
         <div>

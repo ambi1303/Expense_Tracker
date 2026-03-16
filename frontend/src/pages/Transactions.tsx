@@ -17,6 +17,7 @@ const Transactions: React.FC = () => {
     type: searchParams.get('transaction_type') || searchParams.get('type') || '',
     merchant: searchParams.get('merchant') || '',
     accountLabel: searchParams.get('account_label') || '',
+    category: searchParams.get('category') || '',
     startDate: searchParams.get('start_date') || '',
     endDate: searchParams.get('end_date') || '',
   });
@@ -36,6 +37,7 @@ const Transactions: React.FC = () => {
       if (filters.type) params.transaction_type = filters.type;
       if (filters.merchant) params.merchant = filters.merchant;
       if (filters.accountLabel) params.account_label = filters.accountLabel;
+      if (filters.category) params.category = filters.category;
       if (filters.startDate) params.start_date = filters.startDate;
       if (filters.endDate) params.end_date = filters.endDate;
 
@@ -61,6 +63,7 @@ const Transactions: React.FC = () => {
     if (filters.type) params.transaction_type = filters.type;
     if (filters.merchant) params.merchant = filters.merchant;
     if (filters.accountLabel) params.account_label = filters.accountLabel;
+    if (filters.category) params.category = filters.category;
     if (filters.startDate) params.start_date = filters.startDate;
     if (filters.endDate) params.end_date = filters.endDate;
     setSearchParams(params);
@@ -71,6 +74,7 @@ const Transactions: React.FC = () => {
       type: '',
       merchant: '',
       accountLabel: '',
+      category: '',
       startDate: '',
       endDate: '',
     });
@@ -82,6 +86,7 @@ const Transactions: React.FC = () => {
     if (filters.type) params.transaction_type = filters.type;
     if (filters.merchant) params.merchant = filters.merchant;
     if (filters.accountLabel) params.account_label = filters.accountLabel;
+    if (filters.category) params.category = filters.category;
     if (filters.startDate) params.start_date = filters.startDate;
     if (filters.endDate) params.end_date = filters.endDate;
     setSearchParams(params);
@@ -113,7 +118,10 @@ const Transactions: React.FC = () => {
         </div>
       ) : (
         <>
-          <TransactionTable transactions={data?.transactions || []} />
+          <TransactionTable
+            transactions={data?.transactions || []}
+            onTransactionUpdated={fetchTransactions}
+          />
           {data && data.total > 0 && (
             <Pagination
               currentPage={currentPage}

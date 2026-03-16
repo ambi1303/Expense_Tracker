@@ -7,6 +7,8 @@ import Login from './pages/Login';
 import AuthComplete from './pages/AuthComplete';
 import Dashboard from './pages/Dashboard';
 import Transactions from './pages/Transactions';
+import Budgets from './pages/Budgets';
+import Duplicates from './pages/Duplicates';
 import Import from './pages/Import';
 import Settings from './pages/Settings';
 
@@ -41,6 +43,26 @@ const App: React.FC = () => {
               <ProtectedRoute>
                 <Layout>
                   <Transactions />
+                </Layout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/budgets"
+            element={
+              <ProtectedRoute>
+                <Layout>
+                  <Budgets />
+                </Layout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/duplicates"
+            element={
+              <ProtectedRoute>
+                <Layout>
+                  <Duplicates />
                 </Layout>
               </ProtectedRoute>
             }
