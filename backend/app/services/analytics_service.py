@@ -276,8 +276,9 @@ async def get_spending_by_category(
     total_r = await db.execute(total_q)
     total = float(total_r.scalar())
     
+    cat_coalesce = func.coalesce(Transaction.category, "Uncategorized")
     cat_q = select(
-        func.coalesce(Transaction.category, "Uncategorized").label("category"),
+        cat_coalesce.label("category"),
         func.sum(Transaction.amount).label("amount"),
         func.count(Transaction.id).label("count"),
     ).where(
@@ -286,7 +287,7 @@ async def get_spending_by_category(
             Transaction.transaction_type == "debit",
             Transaction.transaction_date >= start_date,
         )
-    ).group_by(func.coalesce(Transaction.category, "Uncategorized")).order_by(
+    ).group_by(cat_coalesce).order_by(
         func.sum(Transaction.amount).desc()
     ).limit(limit)
     r = await db.execute(cat_q)
@@ -311,10 +312,11 @@ async def get_category_monthly_trends(
 ) -> List[CategoryMonthlyPoint]:
     """Get monthly spending per category for charting trends."""
     start_date = datetime.now(timezone.utc) - relativedelta(months=months)
+    cat_coalesce = func.coalesce(Transaction.category, "Uncategorized")
     q = select(
         extract("year", Transaction.transaction_date).label("year"),
         extract("month", Transaction.transaction_date).label("month"),
-        func.coalesce(Transaction.category, "Uncategorized").label("category"),
+        cat_coalesce.label("category"),
         func.sum(Transaction.amount).label("amount"),
     ).where(
         and_(
@@ -325,7 +327,7 @@ async def get_category_monthly_trends(
     ).group_by(
         extract("year", Transaction.transaction_date),
         extract("month", Transaction.transaction_date),
-        func.coalesce(Transaction.category, "Uncategorized"),
+        cat_coalesce,
     ).order_by(
         extract("year", Transaction.transaction_date).desc(),
         extract("month", Transaction.transaction_date).desc(),
@@ -387,9 +389,10 @@ async def get_insights(
                 value=f"{pct_change:+.0f}%",
             ))
     
-    # Top category this month
+    # Top category this month (reuse coalesce expr so GROUP BY matches SELECT)
+    cat_coalesce = func.coalesce(Transaction.category, "Uncategorized")
     cat_q = select(
-        func.coalesce(Transaction.category, "Uncategorized").label("category"),
+        cat_coalesce.label("category"),
         func.sum(Transaction.amount).label("amount"),
     ).where(
         and_(
@@ -397,7 +400,7 @@ async def get_insights(
             Transaction.transaction_type == "debit",
             Transaction.transaction_date >= this_month_start,
         )
-    ).group_by(func.coalesce(Transaction.category, "Uncategorized")).order_by(
+    ).group_by(cat_coalesce).order_by(
         func.sum(Transaction.amount).desc()
     ).limit(1)
     cr = await db.execute(cat_q)
