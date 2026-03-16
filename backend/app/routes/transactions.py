@@ -22,6 +22,7 @@ from app.services.transaction_service import (
     update_transaction_category,
     find_potential_duplicates,
     delete_transaction,
+    batch_auto_categorize,
 )
 from app.schemas.transaction import (
     TransactionListResponse,
@@ -153,6 +154,16 @@ async def list_transactions(
         limit=limit,
         has_more=has_more
     )
+
+
+@router.post("/auto-categorize")
+async def trigger_auto_categorize(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Auto-categorize all uncategorized transactions using merchant/description patterns."""
+    updated = await batch_auto_categorize(db=db, user_id=current_user.id)
+    return {"updated": updated, "message": f"Categorized {updated} transactions"}
 
 
 @router.patch("/{transaction_id}", response_model=TransactionResponse)

@@ -56,6 +56,26 @@ export interface CategoryData {
   percentage: number;
 }
 
+export interface SpendingByCategory {
+  category: string;
+  amount: string;
+  transaction_count: number;
+  percentage: number;
+}
+
+export interface CategoryMonthly {
+  month: string;
+  category: string;
+  amount: string;
+}
+
+export interface Insight {
+  type: string;
+  title: string;
+  message: string;
+  value?: string;
+}
+
 export interface SyncLog {
   id: string;
   status: string;

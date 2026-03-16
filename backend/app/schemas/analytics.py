@@ -8,7 +8,7 @@ API responses including summary statistics, monthly data, and category breakdown
 from pydantic import BaseModel, Field
 from datetime import datetime
 from decimal import Decimal
-from typing import Optional
+from typing import List, Optional
 
 
 class SummaryResponse(BaseModel):
@@ -81,3 +81,26 @@ class CategoryDataPoint(BaseModel):
                 "percentage": 15.89
             }
         }
+
+
+class SpendingByCategoryPoint(BaseModel):
+    """Spending aggregated by inferred category."""
+    category: str = Field(..., description="Category name")
+    amount: Decimal = Field(..., ge=0, description="Total spent in this category")
+    transaction_count: int = Field(..., ge=0, description="Number of transactions")
+    percentage: float = Field(..., ge=0, le=100, description="Percentage of total spending")
+
+
+class CategoryMonthlyPoint(BaseModel):
+    """Monthly spending per category for trends."""
+    month: str = Field(..., description="YYYY-MM")
+    category: str = Field(..., description="Category name")
+    amount: Decimal = Field(..., ge=0, description="Spent in this category this month")
+
+
+class InsightItem(BaseModel):
+    """Single insight for the user."""
+    type: str = Field(..., description="insight type: trend, top_category, comparison, suggestion")
+    title: str = Field(..., description="Short title")
+    message: str = Field(..., description="Descriptive message")
+    value: Optional[str] = Field(None, description="Optional numeric/value")

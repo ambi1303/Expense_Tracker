@@ -15,6 +15,7 @@ import structlog
 
 from app.models.transaction import Transaction
 from app.services.email_parser import ParsedTransaction
+from app.services.category_inference import infer_category
 from app.schemas.transaction import TransactionFilterParams
 
 
@@ -87,6 +88,15 @@ async def create_transaction(
         amount=str(parsed_transaction.amount)
     )
     
+    # Auto-categorize if not already set
+    category = parsed_transaction.category
+    if not category and (parsed_transaction.merchant or parsed_transaction.raw_snippet):
+        category = infer_category(
+            merchant=parsed_transaction.merchant,
+            raw_snippet=parsed_transaction.raw_snippet,
+            bank_name=parsed_transaction.bank_name,
+        )
+    
     try:
         # Create transaction object
         transaction = Transaction(
@@ -99,7 +109,7 @@ async def create_transaction(
             bank_name=parsed_transaction.bank_name,
             account_label=parsed_transaction.account_label,
             gmail_message_id=message_id,
-            category=parsed_transaction.category,
+            category=category or parsed_transaction.category,
             payment_method=parsed_transaction.payment_method,
             upi_reference=parsed_transaction.upi_reference,
             raw_snippet=parsed_transaction.raw_snippet
@@ -370,6 +380,44 @@ async def find_potential_duplicates(
             if len(ids) > 1:  # Different sources
                 duplicates.append(group)
     return duplicates
+
+
+async def batch_auto_categorize(
+    db: AsyncSession,
+    user_id: UUID
+) -> int:
+    """
+    Auto-categorize all uncategorized debit transactions for a user.
+    Returns the number of transactions updated.
+    """
+    from app.services.category_inference import infer_category
+    
+    q = select(Transaction).where(
+        and_(
+            Transaction.user_id == user_id,
+            Transaction.transaction_type == "debit",
+            or_(
+                Transaction.category.is_(None),
+                Transaction.category == ""
+            )
+        )
+    )
+    result = await db.execute(q)
+    txns = list(result.scalars().all())
+    updated = 0
+    for t in txns:
+        cat = infer_category(
+            merchant=t.merchant,
+            raw_snippet=t.raw_snippet,
+            bank_name=t.bank_name,
+        )
+        if cat:
+            t.category = cat
+            updated += 1
+    if updated:
+        await db.commit()
+        logger.info("batch_auto_categorize_success", user_id=str(user_id), updated=updated)
+    return updated
 
 
 async def delete_transaction(

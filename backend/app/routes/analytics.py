@@ -16,12 +16,18 @@ from app.models.user import User
 from app.services.analytics_service import (
     get_summary,
     get_monthly_data,
-    get_category_breakdown
+    get_category_breakdown,
+    get_spending_by_category,
+    get_category_monthly_trends,
+    get_insights,
 )
 from app.schemas.analytics import (
     SummaryResponse,
     MonthlyDataPoint,
-    CategoryDataPoint
+    CategoryDataPoint,
+    SpendingByCategoryPoint,
+    CategoryMonthlyPoint,
+    InsightItem,
 )
 
 
@@ -138,3 +144,37 @@ async def get_category_analytics(
     )
     
     return categories
+
+
+@router.get("/by-category", response_model=List[SpendingByCategoryPoint])
+async def get_spending_by_category_route(
+    limit: int = Query(15, ge=1, le=20, description="Max categories"),
+    months: int = Query(6, ge=1, le=24),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Get spending breakdown by inferred category."""
+    return await get_spending_by_category(
+        db=db, user_id=current_user.id, limit=limit, months=months
+    )
+
+
+@router.get("/category-trends", response_model=List[CategoryMonthlyPoint])
+async def get_category_trends_route(
+    months: int = Query(6, ge=1, le=24),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Get monthly spending per category for trend charts."""
+    return await get_category_monthly_trends(
+        db=db, user_id=current_user.id, months=months
+    )
+
+
+@router.get("/insights", response_model=List[InsightItem])
+async def get_insights_route(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Get intelligent insights (month-over-month, top category, suggestions)."""
+    return await get_insights(db=db, user_id=current_user.id)

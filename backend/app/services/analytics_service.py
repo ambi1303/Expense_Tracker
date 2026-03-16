@@ -11,12 +11,15 @@ from datetime import datetime, timezone
 from dateutil.relativedelta import relativedelta
 from decimal import Decimal
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, and_, extract, case
+from sqlalchemy import select, func, and_, or_, extract, case
 import structlog
 
 from app.models.transaction import Transaction
 from app.models.sync_log import SyncLog
-from app.schemas.analytics import SummaryResponse, MonthlyDataPoint, CategoryDataPoint
+from app.schemas.analytics import (
+    SummaryResponse, MonthlyDataPoint, CategoryDataPoint,
+    SpendingByCategoryPoint, CategoryMonthlyPoint, InsightItem,
+)
 
 
 logger = structlog.get_logger()
@@ -250,3 +253,181 @@ async def get_category_breakdown(
     )
     
     return categories
+
+
+async def get_spending_by_category(
+    db: AsyncSession,
+    user_id: UUID,
+    limit: int = 15,
+    months: int = 6,
+) -> List[SpendingByCategoryPoint]:
+    """
+    Get spending breakdown by inferred category.
+    Uses category when set, otherwise groups uncategorized as "Uncategorized".
+    """
+    start_date = datetime.now(timezone.utc) - relativedelta(months=months)
+    total_q = select(func.coalesce(func.sum(Transaction.amount), 0)).where(
+        and_(
+            Transaction.user_id == user_id,
+            Transaction.transaction_type == "debit",
+            Transaction.transaction_date >= start_date,
+        )
+    )
+    total_r = await db.execute(total_q)
+    total = float(total_r.scalar())
+    
+    cat_q = select(
+        func.coalesce(Transaction.category, "Uncategorized").label("category"),
+        func.sum(Transaction.amount).label("amount"),
+        func.count(Transaction.id).label("count"),
+    ).where(
+        and_(
+            Transaction.user_id == user_id,
+            Transaction.transaction_type == "debit",
+            Transaction.transaction_date >= start_date,
+        )
+    ).group_by(func.coalesce(Transaction.category, "Uncategorized")).order_by(
+        func.sum(Transaction.amount).desc()
+    ).limit(limit)
+    r = await db.execute(cat_q)
+    rows = r.all()
+    
+    return [
+        SpendingByCategoryPoint(
+            category=row.category,
+            amount=Decimal(str(row.amount)),
+            transaction_count=row.count,
+            percentage=round((float(row.amount) / total * 100), 2) if total > 0 else 0,
+        )
+        for row in rows
+    ]
+
+
+async def get_category_monthly_trends(
+    db: AsyncSession,
+    user_id: UUID,
+    months: int = 6,
+    top_categories: int = 5,
+) -> List[CategoryMonthlyPoint]:
+    """Get monthly spending per category for charting trends."""
+    start_date = datetime.now(timezone.utc) - relativedelta(months=months)
+    q = select(
+        extract("year", Transaction.transaction_date).label("year"),
+        extract("month", Transaction.transaction_date).label("month"),
+        func.coalesce(Transaction.category, "Uncategorized").label("category"),
+        func.sum(Transaction.amount).label("amount"),
+    ).where(
+        and_(
+            Transaction.user_id == user_id,
+            Transaction.transaction_type == "debit",
+            Transaction.transaction_date >= start_date,
+        )
+    ).group_by(
+        extract("year", Transaction.transaction_date),
+        extract("month", Transaction.transaction_date),
+        func.coalesce(Transaction.category, "Uncategorized"),
+    ).order_by(
+        extract("year", Transaction.transaction_date).desc(),
+        extract("month", Transaction.transaction_date).desc(),
+        func.sum(Transaction.amount).desc(),
+    )
+    r = await db.execute(q)
+    return [
+        CategoryMonthlyPoint(
+            month=f"{int(row.year)}-{int(row.month):02d}",
+            category=row.category,
+            amount=Decimal(str(row.amount)),
+        )
+        for row in r.all()
+    ]
+
+
+async def get_insights(
+    db: AsyncSession,
+    user_id: UUID,
+) -> List[InsightItem]:
+    """Generate intelligent insights from transaction data."""
+    now = datetime.now(timezone.utc)
+    this_month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    last_month_start = this_month_start - relativedelta(months=1)
+    two_months_ago = this_month_start - relativedelta(months=2)
+    
+    insights: List[InsightItem] = []
+    
+    # This month spent
+    q_this = select(func.coalesce(func.sum(Transaction.amount), 0)).where(
+        and_(
+            Transaction.user_id == user_id,
+            Transaction.transaction_type == "debit",
+            Transaction.transaction_date >= this_month_start,
+        )
+    )
+    # Last month spent
+    q_last = select(func.coalesce(func.sum(Transaction.amount), 0)).where(
+        and_(
+            Transaction.user_id == user_id,
+            Transaction.transaction_type == "debit",
+            Transaction.transaction_date >= last_month_start,
+            Transaction.transaction_date < this_month_start,
+        )
+    )
+    r_this = await db.execute(q_this)
+    r_last = await db.execute(q_last)
+    this_spent = float(r_this.scalar())
+    last_spent = float(r_last.scalar())
+    
+    if last_spent > 0 and this_spent > 0:
+        pct_change = ((this_spent - last_spent) / last_spent) * 100
+        if abs(pct_change) >= 5:
+            direction = "more" if pct_change > 0 else "less"
+            insights.append(InsightItem(
+                type="comparison",
+                title="Month-over-month",
+                message=f"You spent {abs(pct_change):.0f}% {direction} this month compared to last month.",
+                value=f"{pct_change:+.0f}%",
+            ))
+    
+    # Top category this month
+    cat_q = select(
+        func.coalesce(Transaction.category, "Uncategorized").label("category"),
+        func.sum(Transaction.amount).label("amount"),
+    ).where(
+        and_(
+            Transaction.user_id == user_id,
+            Transaction.transaction_type == "debit",
+            Transaction.transaction_date >= this_month_start,
+        )
+    ).group_by(func.coalesce(Transaction.category, "Uncategorized")).order_by(
+        func.sum(Transaction.amount).desc()
+    ).limit(1)
+    cr = await db.execute(cat_q)
+    top_row = cr.fetchone()
+    if top_row and top_row.amount and this_spent > 0:
+        pct = (float(top_row.amount) / this_spent) * 100
+        insights.append(InsightItem(
+            type="top_category",
+            title="Top category this month",
+            message=f"'{top_row.category}' accounts for {pct:.0f}% of your spending.",
+            value=top_row.category,
+        ))
+    
+    # Uncategorized count
+    uncat_q = select(func.count(Transaction.id)).where(
+        and_(
+            Transaction.user_id == user_id,
+            Transaction.transaction_type == "debit",
+            or_(Transaction.category.is_(None), Transaction.category == ""),
+            Transaction.transaction_date >= two_months_ago,
+        )
+    )
+    ur = await db.execute(uncat_q)
+    uncat = ur.scalar()
+    if uncat and uncat > 0:
+        insights.append(InsightItem(
+            type="suggestion",
+            title="Improve categorization",
+            message=f"You have {uncat} uncategorized transactions. Use 'Auto-categorize' to assign categories automatically.",
+            value=str(uncat),
+        ))
+    
+    return insights

@@ -66,22 +66,42 @@ def _parse_date(val: str) -> Optional[datetime]:
 
 
 def _infer_type(amount: Decimal, desc_lower: str, col_names: List[str]) -> TransactionType:
-    """Infer debit vs credit from context."""
+    """
+    Infer debit vs credit from amount sign, description, or column names.
+    Handles different bank terminologies: Withdrawal/Deposit, Dr/Cr, Debit/Credit, etc.
+    """
     if amount < 0:
         return TransactionType.CREDIT
     if amount > 0:
         return TransactionType.DEBIT
-    # Check column names / description
-    debit_hints = ["debit", "withdraw", "payment", "purchase", "dr", "paid", "spent"]
-    credit_hints = ["credit", "deposit", "received", "refund", "cr"]
+    # Check description (narration often contains type keywords)
     d = desc_lower
+    # Money out (debit)
+    debit_hints = [
+        "debit", "withdrawal", "withdrawn", "withdraw", "dr ", " dr", ".dr",
+        "payment", "paid", "purchase", "purchases", "charges", "spent",
+        "debited", "out", "transfer out", "neft outward", "imps paid",
+    ]
+    # Money in (credit)
+    credit_hints = [
+        "credit", "deposit", "deposited", "dep ", " cr", ".cr",
+        "received", "refund", "credited", "interest", "in",
+        "transfer in", "neft inward", "imps received", "upi received",
+        "salary", "dividend",
+    ]
     for h in debit_hints:
         if h in d:
             return TransactionType.DEBIT
     for h in credit_hints:
         if h in d:
             return TransactionType.CREDIT
-    return TransactionType.DEBIT  # default
+    # Check column names for context
+    cols_str = " ".join(str(c).lower() for c in col_names)
+    if any(x in cols_str for x in ["withdrawal", "withdraw", "debit", "dr", "paid"]):
+        return TransactionType.DEBIT
+    if any(x in cols_str for x in ["deposit", "credit", "cr", "received", "refund"]):
+        return TransactionType.CREDIT
+    return TransactionType.DEBIT  # default for single amount column
 
 
 def parse_csv_statement(
@@ -112,6 +132,7 @@ def parse_csv_statement(
     if amt_idx is None and (debit_idx is None or credit_idx is None):
         amt_idx = 1
     desc_idx = cols["desc"]
+    type_idx = cols.get("type")
 
     transactions: List[ParsedTransaction] = []
     for i, row in enumerate(rows[1:], start=2):
@@ -148,7 +169,17 @@ def parse_csv_statement(
                 amount = _normalize_amount(raw)
                 if amount is not None and amount != 0:
                     amount = abs(amount)
-                    tx_type = _infer_type(Decimal(str(amount)), desc_lower, headers)
+                    # Use type column (Dr/Cr, Debit/Credit, Withdrawal/Deposit) if present
+                    if type_idx is not None and type_idx < len(row):
+                        type_val = str(row[type_idx]).strip() if row[type_idx] else ""
+                        if _is_debit_type(type_val):
+                            tx_type = TransactionType.DEBIT
+                        elif _is_credit_type(type_val):
+                            tx_type = TransactionType.CREDIT
+                        else:
+                            tx_type = _infer_type(Decimal(str(amount)), desc_lower, headers)
+                    else:
+                        tx_type = _infer_type(Decimal(str(amount)), desc_lower, headers)
 
             if amount is None or amount <= 0:
                 continue
@@ -178,18 +209,51 @@ _TABLE_STRATEGIES = [
     {"vertical_strategy": "lines", "horizontal_strategy": "lines"},  # Explicit lines only
 ]
 
-# Column name variants across Indian banks (HDFC, ICICI, SBI, Axis, Kotak, etc.)
-_DATE_HEADERS = ["date", "transaction date", "posting date", "value date", "txn date", "trans date", "billing date", "post date"]
-_AMOUNT_HEADERS = ["amount", "transaction amount", "txn amount", "balance"]
-_DEBIT_HEADERS = ["debit", "withdrawal", "withdraw", "dr", "paid", "purchase", "charges"]
-_CREDIT_HEADERS = ["credit", "deposit", "dep", "cr", "received", "refund", "payment"]
+# Column name variants across Indian banks (HDFC, ICICI, SBI, Axis, Kotak, Yes, IDFC, etc.)
+# Banks use different terms: Debit/Credit, Withdrawal/Deposit, Dr/Cr, Out/In, Paid/Received
+_DATE_HEADERS = ["date", "transaction date", "posting date", "value date", "txn date", "trans date", "billing date", "post date", "value date"]
+_AMOUNT_HEADERS = ["amount", "transaction amount", "txn amount", "balance", "value"]
+# Money OUT (expense): Debit, Withdrawal, Dr, Purchases, Charges, Paid, etc.
+_DEBIT_HEADERS = [
+    "debit", "debit amount", "withdrawal", "withdrawals", "withdraw", "withdrawn",
+    "dr", "d.r.", "out", "outflow", "paid", "purchase", "purchases", "charges",
+    "spent", "expenses", "expense", "withdrawal amount", "debits",
+    "payment",  # Some banks: "Payment" = amount you paid (debit)
+]
+# Money IN (income): Credit, Deposit, Cr, Refund, Received, etc.
+_CREDIT_HEADERS = [
+    "credit", "credit amount", "deposit", "deposits", "dep.",
+    "cr", "c.r.", "in", "inflow", "received", "refund", "refunds",
+    "deposit amount", "credits", "interest", "interest credited",
+    "payments",  # Credit card: "Payments" = payments you made to card (credit)
+]
+# Transaction type column: contains values like "DR"/"CR"/"Debit"/"Credit"/"Withdrawal"/"Deposit"
+_TYPE_HEADERS = ["type", "transaction type", "txn type", "entry", "dr/cr", "d/c", "debit/credit"]
 _DESC_HEADERS = ["description", "particulars", "narration", "remarks", "details", "transaction details", "transaction description", "ref", "particular", "narrative", "merchant", "payee"]
+
+
+def _is_debit_type(val: str) -> bool:
+    """Return True if cell value indicates debit (money out)."""
+    v = (val or "").strip().upper()
+    if not v:
+        return False
+    debits = ("D", "DR", "DEBIT", "DB", "DEB", "WITHDRAWAL", "WITHDRAW", "OUT", "PAID", "CHARGES", "PURCHASE", "PURCHASES")
+    return v in debits or v.startswith("DR") or v.startswith("DEBIT")
+
+
+def _is_credit_type(val: str) -> bool:
+    """Return True if cell value indicates credit (money in)."""
+    v = (val or "").strip().upper()
+    if not v:
+        return False
+    credits = ("C", "CR", "CREDIT", "CRED", "DEPOSIT", "DEP", "IN", "RECEIVED", "REFUND", "CREDITED", "PAYMENT")
+    return v in credits or v.startswith("CR") or v.startswith("CREDIT")
 
 
 def _find_column_indices(headers: List[str]) -> dict:
     """Map column types to indices for varied bank formats."""
     h_lower = [str(h).strip().lower() if h else "" for h in headers]
-    result = {"date": 0, "debit": None, "credit": None, "amount": None, "desc": len(h_lower) - 1}
+    result = {"date": 0, "debit": None, "credit": None, "amount": None, "type": None, "desc": len(h_lower) - 1}
     for i, h in enumerate(h_lower):
         if not h:
             continue
@@ -201,6 +265,8 @@ def _find_column_indices(headers: List[str]) -> dict:
             result["credit"] = i
         elif any(a in h for a in _AMOUNT_HEADERS) or "amount" in h:
             result["amount"] = i
+        elif any(t in h for t in _TYPE_HEADERS):
+            result["type"] = i
         elif any(d in h for d in _DESC_HEADERS) or "desc" in h or "particular" in h or "narration" in h:
             result["desc"] = i
     return result
@@ -254,7 +320,17 @@ def _row_to_transaction(
         amount = _normalize_amount(raw)
         if amount and amount != 0:
             amount = abs(amount)
-            tx_type = _infer_type(amount, desc_lower, [str(x) for x in row])
+            # Prefer type column (Dr/Cr, Debit/Credit, Withdrawal/Deposit) over inference
+            if cols["type"] is not None and cols["type"] < len(row):
+                type_val = str(row[cols["type"]]).strip() if row[cols["type"]] else ""
+                if _is_debit_type(type_val):
+                    tx_type = TransactionType.DEBIT
+                elif _is_credit_type(type_val):
+                    tx_type = TransactionType.CREDIT
+                else:
+                    tx_type = _infer_type(amount, desc_lower, [str(x) for x in row])
+            else:
+                tx_type = _infer_type(amount, desc_lower, [str(x) for x in row])
 
     if not amount or amount <= 0:
         return None
@@ -278,49 +354,54 @@ def _row_to_transaction(
 def _extract_from_text(text: str, seen: set) -> List[ParsedTransaction]:
     """Extract transactions from raw text when table extraction fails."""
     results = []
-    # Multiple patterns for different bank formats
+    # Multiple patterns for different bank formats (capture Cr/Dr for debit/credit)
+    def _add_from_match(m, date_str: str, amt_str: str, desc: Optional[str], crdr: str):
+        tx_date = _parse_date(date_str)
+        amount = _normalize_amount(amt_str)
+        if tx_date and amount and amount > 0:
+            tx_type = TransactionType.CREDIT if (crdr or "").strip().upper() == "CR" else TransactionType.DEBIT
+            key = (tx_date.date().isoformat(), str(amount))
+            if key not in seen:
+                seen.add(key)
+                results.append(
+                    ParsedTransaction(
+                        amount=amount,
+                        currency="INR",
+                        transaction_type=tx_type,
+                        merchant=desc[:255] if desc else None,
+                        transaction_date=tx_date,
+                        bank_name=None,
+                        payment_method="Statement",
+                        raw_snippet=m.group(0)[:300],
+                    )
+                )
+
     patterns = [
-        # DD-MM-YYYY or DD/MM/YYYY ... amount (with optional Cr/Dr)
-        r"(\d{1,2}[-/\.]\d{1,2}[-/\.]\d{4})\s+.*?(\d{1,3}(?:,\d{3})*(?:\.\d{2})?)\s*(?:Cr|Dr)?",
-        # DD Mon YYYY
-        r"(\d{1,2}\s+[A-Za-z]{3,9}\s+\d{4})\s+.*?(\d{1,3}(?:,\d{3})*(?:\.\d{2})?)\s*(?:Cr|Dr)?",
-        # Rs. 1,234.56 or ₹1234.56
+        # DD-MM-YYYY ... amount Cr/Dr
+        r"(\d{1,2}[-/\.]\d{1,2}[-/\.]\d{4})\s+.*?(\d{1,3}(?:,\d{3})*(?:\.\d{2})?)\s*(Cr|Dr)?",
+        # DD Mon YYYY ... amount Cr/Dr
+        r"(\d{1,2}\s+[A-Za-z]{3,9}\s+\d{4})\s+.*?(\d{1,3}(?:,\d{3})*(?:\.\d{2})?)\s*(Cr|Dr)?",
+        # Rs. amount ... date
         r"(?:Rs\.?|₹|INR)\s*(\d{1,3}(?:,\d{3})*(?:\.\d{2})?)\s+.*?(\d{1,2}[-/]\d{1,2}[-/]\d{4})",
-        # Amount at end: ... 1,234.56
-        r"(\d{1,2}[-/]\d{1,2}[-/]\d{4})\s+(.+?)\s+(\d{1,3}(?:,\d{3})*(?:\.\d{2})?)\s*$",
+        # date desc amount Cr/Dr
+        r"(\d{1,2}[-/]\d{1,2}[-/]\d{4})\s+(.+?)\s+(\d{1,3}(?:,\d{3})*(?:\.\d{2})?)\s*(Cr|Dr)?\s*$",
     ]
     for pattern in patterns:
         for m in re.finditer(pattern, text, re.MULTILINE | re.DOTALL):
             try:
-                if len(m.groups()) == 2:
-                    g1, g2 = m.group(1), m.group(2)
-                    # First group is date if it starts with DD-MM or DD Mon
-                    if re.match(r"\d{1,2}[-/\.]\d", g1) or re.match(r"\d{1,2}\s+[A-Za-z]{3}", g1):
-                        date_str, amt_str = g1, g2
-                        desc = None
-                    else:
-                        date_str, amt_str = g2, g1
-                        desc = g1[:100] if re.match(r"\d", g1) is None else None
-                else:
-                    date_str, desc, amt_str = m.group(1), m.group(2), m.group(3)
-                tx_date = _parse_date(date_str)
-                amount = _normalize_amount(amt_str)
-                if tx_date and amount and amount > 0:
-                    key = (tx_date.date().isoformat(), str(amount))
-                    if key not in seen:
-                        seen.add(key)
-                        results.append(
-                            ParsedTransaction(
-                                amount=amount,
-                                currency="INR",
-                                transaction_type=TransactionType.DEBIT,
-                                merchant=desc[:255] if desc else None,
-                                transaction_date=tx_date,
-                                bank_name=None,
-                                payment_method="Statement",
-                                raw_snippet=m.group(0)[:300],
-                            )
-                        )
+                g = m.groups()
+                if len(g) == 2:
+                    # Rs. amount date
+                    amt_str, date_str = g[0], g[1]
+                    _add_from_match(m, date_str, amt_str, None, "")
+                elif len(g) == 3:
+                    date_str, amt_str = g[0], g[1]
+                    crdr = (g[2] or "").strip()
+                    _add_from_match(m, date_str, amt_str, None, crdr)
+                elif len(g) >= 4:
+                    date_str, desc, amt_str = g[0], g[1], g[2]
+                    crdr = (g[3] or "").strip()
+                    _add_from_match(m, date_str, amt_str, desc, crdr)
             except (IndexError, AttributeError):
                 continue
     return results
