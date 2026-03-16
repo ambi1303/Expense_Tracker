@@ -176,10 +176,15 @@ def parse_csv_statement(
     return transactions
 
 
-def parse_pdf_statement(content: bytes, filename: str = "") -> List[ParsedTransaction]:
+def parse_pdf_statement(
+    content: bytes,
+    filename: str = "",
+    password: Optional[str] = None,
+) -> List[ParsedTransaction]:
     """
     Parse bank/credit card statement PDF.
     Extracts text and tables using pdfplumber.
+    Supports password-protected PDFs via the password parameter.
     """
     try:
         import pdfplumber
@@ -191,7 +196,7 @@ def parse_pdf_statement(content: bytes, filename: str = "") -> List[ParsedTransa
     seen: set = set()  # (date, amount, desc) for dedup
 
     try:
-        with pdfplumber.open(io.BytesIO(content)) as pdf:
+        with pdfplumber.open(io.BytesIO(content), password=password or None) as pdf:
             for page in pdf.pages:
                 # Try tables first
                 tables = page.extract_tables()
@@ -254,7 +259,14 @@ def parse_pdf_statement(content: bytes, filename: str = "") -> List[ParsedTransa
                                     raw_snippet=m.group(0)[:200],
                                 )
                             )
+    except ValueError:
+        raise
     except Exception as e:
+        err_msg = str(e).lower()
+        if "password" in err_msg or "encrypted" in err_msg or "decrypt" in err_msg or "wrong password" in err_msg:
+            raise ValueError(
+                "This PDF is password-protected. Please provide the correct password to unlock it."
+            ) from e
         logger.error("statement_pdf_parse_failed", error=str(e), exc_info=True)
 
     return transactions

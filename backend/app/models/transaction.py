@@ -57,8 +57,9 @@ class Transaction(Base):
     merchant = Column(String(255), nullable=True)
     transaction_date = Column(DateTime(timezone=True), nullable=False)
     bank_name = Column(String(255), nullable=True)
+    account_label = Column(String(128), nullable=True, index=True)  # e.g. "HDFC Savings", "ICICI Credit Card"
     gmail_message_id = Column(String(255), unique=True, nullable=False, index=True)
-    
+
     # New fields for enhanced functionality
     category = Column(String(100), nullable=True, index=True)
     payment_method = Column(String(50), nullable=True)

@@ -16,6 +16,7 @@ const Transactions: React.FC = () => {
   const [filters, setFilters] = useState({
     type: searchParams.get('transaction_type') || searchParams.get('type') || '',
     merchant: searchParams.get('merchant') || '',
+    accountLabel: searchParams.get('account_label') || '',
     startDate: searchParams.get('start_date') || '',
     endDate: searchParams.get('end_date') || '',
   });
@@ -34,6 +35,7 @@ const Transactions: React.FC = () => {
 
       if (filters.type) params.transaction_type = filters.type;
       if (filters.merchant) params.merchant = filters.merchant;
+      if (filters.accountLabel) params.account_label = filters.accountLabel;
       if (filters.startDate) params.start_date = filters.startDate;
       if (filters.endDate) params.end_date = filters.endDate;
 
@@ -58,6 +60,7 @@ const Transactions: React.FC = () => {
     const params: Record<string, string> = { page: '1' };
     if (filters.type) params.transaction_type = filters.type;
     if (filters.merchant) params.merchant = filters.merchant;
+    if (filters.accountLabel) params.account_label = filters.accountLabel;
     if (filters.startDate) params.start_date = filters.startDate;
     if (filters.endDate) params.end_date = filters.endDate;
     setSearchParams(params);
@@ -67,6 +70,7 @@ const Transactions: React.FC = () => {
     setFilters({
       type: '',
       merchant: '',
+      accountLabel: '',
       startDate: '',
       endDate: '',
     });
@@ -77,6 +81,7 @@ const Transactions: React.FC = () => {
     const params: Record<string, string> = { page: page.toString() };
     if (filters.type) params.transaction_type = filters.type;
     if (filters.merchant) params.merchant = filters.merchant;
+    if (filters.accountLabel) params.account_label = filters.accountLabel;
     if (filters.startDate) params.start_date = filters.startDate;
     if (filters.endDate) params.end_date = filters.endDate;
     setSearchParams(params);

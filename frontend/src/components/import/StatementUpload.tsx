@@ -16,6 +16,8 @@ interface StatementUploadProps {
 
 const StatementUpload: React.FC<StatementUploadProps> = ({ onImportComplete }) => {
   const [file, setFile] = useState<File | null>(null);
+  const [accountLabel, setAccountLabel] = useState('');
+  const [pdfPassword, setPdfPassword] = useState('');
   const [uploading, setUploading] = useState(false);
   const [previewing, setPreviewing] = useState(false);
   const [preview, setPreview] = useState<{ count: number; preview: PreviewItem[]; truncated: boolean } | null>(null);
@@ -49,6 +51,7 @@ const StatementUpload: React.FC<StatementUploadProps> = ({ onImportComplete }) =
       setMessage(null);
       const form = new FormData();
       form.append('file', file);
+      if (file.name.toLowerCase().endsWith('.pdf') && pdfPassword) form.append('pdf_password', pdfPassword);
       const res = await api.post('/statements/preview', form, {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
@@ -61,7 +64,7 @@ const StatementUpload: React.FC<StatementUploadProps> = ({ onImportComplete }) =
     } finally {
       setPreviewing(false);
     }
-  }, [file]);
+  }, [file, pdfPassword]);
 
   const handleImport = useCallback(async () => {
     if (!file) return;
@@ -75,6 +78,8 @@ const StatementUpload: React.FC<StatementUploadProps> = ({ onImportComplete }) =
       setMessage(null);
       const form = new FormData();
       form.append('file', file);
+      if (accountLabel.trim()) form.append('account_label', accountLabel.trim());
+      if (file.name.toLowerCase().endsWith('.pdf') && pdfPassword) form.append('pdf_password', pdfPassword);
       const res = await api.post('/statements/upload', form, {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
@@ -84,6 +89,7 @@ const StatementUpload: React.FC<StatementUploadProps> = ({ onImportComplete }) =
       });
       setFile(null);
       setPreview(null);
+      setPdfPassword('');
       onImportComplete?.();
     } catch (e: any) {
       setMessage({
@@ -93,7 +99,7 @@ const StatementUpload: React.FC<StatementUploadProps> = ({ onImportComplete }) =
     } finally {
       setUploading(false);
     }
-  }, [file, onImportComplete]);
+  }, [file, accountLabel, pdfPassword, onImportComplete]);
 
   const onDrop = useCallback(
     (e: React.DragEvent) => {
@@ -155,7 +161,35 @@ const StatementUpload: React.FC<StatementUploadProps> = ({ onImportComplete }) =
       </div>
 
       {file && (
-        <div className="flex gap-3">
+        <div className="space-y-3">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+              Account / Card label (optional)
+            </label>
+            <input
+              type="text"
+              value={accountLabel}
+              onChange={(e) => setAccountLabel(e.target.value)}
+              placeholder="e.g. HDFC Credit Card, ICICI Savings"
+              className="w-full max-w-md px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
+            />
+          </div>
+          {file?.name.toLowerCase().endsWith('.pdf') && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                PDF password (if locked)
+              </label>
+              <input
+                type="password"
+                value={pdfPassword}
+                onChange={(e) => setPdfPassword(e.target.value)}
+                placeholder="Enter password if PDF is protected"
+                className="w-full max-w-md px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
+                autoComplete="current-password"
+              />
+            </div>
+          )}
+          <div className="flex gap-3">
           <button
             onClick={handlePreview}
             disabled={previewing}
@@ -170,6 +204,7 @@ const StatementUpload: React.FC<StatementUploadProps> = ({ onImportComplete }) =
           >
             {uploading ? 'Importing...' : 'Import'}
           </button>
+          </div>
         </div>
       )}
 

@@ -26,13 +26,14 @@ class TransactionType(str, Enum):
 
 
 class ParsedTransaction(BaseModel):
-    """Structured transaction data extracted from email."""
+    """Structured transaction data extracted from email or statement."""
     amount: Decimal
     currency: str = "INR"
     transaction_type: TransactionType
     merchant: Optional[str] = None
     transaction_date: datetime
     bank_name: Optional[str] = None
+    account_label: Optional[str] = None  # e.g. "HDFC Credit Card", "ICICI Savings"
     category: Optional[str] = None
     payment_method: Optional[str] = None
     upi_reference: Optional[str] = None
@@ -384,11 +385,12 @@ def parse_emails(subject: str, body: str) -> List[ParsedTransaction]:
         
         merchant = extract_merchant(block)
         bank = extract_bank(block) or primary_bank
+        account_label = extract_account_label(block, bank)
         upi_ref = extract_upi_reference(block)
         payment_method = extract_payment_method(block)
         category = auto_categorize(merchant, block)
         raw_snippet = block[:500] if len(block) > 500 else block
-        
+
         results.append(ParsedTransaction(
             amount=amount,
             currency=extract_currency(block) or primary_currency,
@@ -396,6 +398,7 @@ def parse_emails(subject: str, body: str) -> List[ParsedTransaction]:
             merchant=merchant,
             transaction_date=tx_date,
             bank_name=bank,
+            account_label=account_label,
             category=category,
             payment_method=payment_method,
             upi_reference=upi_ref,
@@ -692,18 +695,51 @@ def extract_date(text: str) -> Optional[datetime]:
 def extract_bank(text: str) -> Optional[str]:
     """
     Identify bank name from email content.
-    
+
     Args:
         text: Text to analyze (typically email sender or body).
-        
+
     Returns:
         Bank name if identified, None otherwise.
     """
     text_lower = text.lower()
-    
+
     for bank_name, keywords in BANK_PATTERNS.items():
         for keyword in keywords:
             if keyword in text_lower:
                 return bank_name
-    
+
     return None
+
+
+def extract_account_label(text: str, bank_name: Optional[str] = None) -> Optional[str]:
+    """
+    Build account label from bank + card/product type (e.g. "HDFC Credit Card", "ICICI Savings").
+    Helps distinguish multiple accounts and cards from the same bank.
+
+    Args:
+        text: Email or statement text.
+        bank_name: Bank already identified by extract_bank.
+
+    Returns:
+        Account label string, e.g. "HDFC Credit Card", "SBI Debit", or "HDFC Bank".
+    """
+    text_lower = text.lower()
+    bank = bank_name or extract_bank(text)
+    if not bank:
+        return None
+
+    # Credit card indicators
+    if any(kw in text_lower for kw in ['credit card', 'cred card', 'cc ', 'card ending', 'card no']):
+        return f"{bank} Credit Card"
+    # Debit card
+    if any(kw in text_lower for kw in ['debit card', 'atm card', 'atm withdrawal']):
+        return f"{bank} Debit"
+    # Savings
+    if any(kw in text_lower for kw in ['savings', 'sb account', 'current account']):
+        return f"{bank} Savings"
+    # UPI often from primary account
+    if any(kw in text_lower for kw in ['upi', 'imps', 'neft', 'rtgs']):
+        return f"{bank} (UPI/Transfer)"
+
+    return f"{bank} Bank"

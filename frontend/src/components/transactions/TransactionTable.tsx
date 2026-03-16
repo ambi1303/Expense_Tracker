@@ -24,7 +24,7 @@ const TransactionTable: React.FC<TransactionTableProps> = ({ transactions }) => 
                 Merchant
               </th>
               <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                Bank
+                Account / Card
               </th>
               <th scope="col" className="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
                 Amount
@@ -53,7 +53,7 @@ const TransactionTable: React.FC<TransactionTableProps> = ({ transactions }) => 
                     {transaction.merchant || 'N/A'}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
-                    {transaction.bank_name || 'N/A'}
+                    {transaction.account_label || transaction.bank_name || 'N/A'}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-right font-medium">
                     <span

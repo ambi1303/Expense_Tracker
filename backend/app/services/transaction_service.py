@@ -26,6 +26,7 @@ ALLOWED_SORT_FIELDS = {
     'amount',
     'merchant',
     'bank_name',
+    'account_label',
     'transaction_type',
     'created_at'
 }
@@ -96,8 +97,8 @@ async def create_transaction(
             merchant=parsed_transaction.merchant,
             transaction_date=parsed_transaction.transaction_date,
             bank_name=parsed_transaction.bank_name,
+            account_label=parsed_transaction.account_label,
             gmail_message_id=message_id,
-            # New fields
             category=parsed_transaction.category,
             payment_method=parsed_transaction.payment_method,
             upi_reference=parsed_transaction.upi_reference,
@@ -209,6 +210,9 @@ async def get_transactions(
         
         if filters.bank_name:
             query = query.where(Transaction.bank_name.ilike(f"%{filters.bank_name}%"))
+
+        if filters.account_label:
+            query = query.where(Transaction.account_label.ilike(f"%{filters.account_label}%"))
         
         if filters.min_amount:
             query = query.where(Transaction.amount >= filters.min_amount)

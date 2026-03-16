@@ -4,6 +4,7 @@ interface FilterBarProps {
   filters: {
     type: string;
     merchant: string;
+    accountLabel: string;
     startDate: string;
     endDate: string;
   };
@@ -14,7 +15,7 @@ interface FilterBarProps {
 const FilterBar: React.FC<FilterBarProps> = ({ filters, onFilterChange, onReset }) => {
   return (
     <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6 border border-gray-200 dark:border-gray-700">
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
         <div>
           <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
             Transaction Type
@@ -39,6 +40,19 @@ const FilterBar: React.FC<FilterBarProps> = ({ filters, onFilterChange, onReset 
             value={filters.merchant}
             onChange={(e) => onFilterChange('merchant', e.target.value)}
             placeholder="Search merchant..."
+            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 focus:ring-2 focus:ring-primary-500"
+          />
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+            Account / Card
+          </label>
+          <input
+            type="text"
+            value={filters.accountLabel}
+            onChange={(e) => onFilterChange('accountLabel', e.target.value)}
+            placeholder="HDFC Credit Card, ICICI..."
             className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 focus:ring-2 focus:ring-primary-500"
           />
         </div>

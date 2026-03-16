@@ -6,7 +6,7 @@ as an alternative to Gmail-based analysis.
 """
 
 import uuid
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, status
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from sqlalchemy.ext.asyncio import AsyncSession
 import structlog
 
@@ -30,6 +30,8 @@ router = APIRouter(prefix="/statements", tags=["statements"])
 @router.post("/upload")
 async def upload_statement(
     file: UploadFile = File(...),
+    account_label: str | None = Form(None, description="Account/card label e.g. HDFC Credit Card, ICICI Savings"),
+    pdf_password: str | None = Form(None, description="Password for password-protected PDF statements"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -64,7 +66,12 @@ async def upload_statement(
     if ext == ".csv":
         transactions = parse_csv_statement(content, file.filename)
     else:
-        transactions = parse_pdf_statement(content, file.filename)
+        try:
+            transactions = parse_pdf_statement(
+                content, file.filename, password=pdf_password.strip() if pdf_password else None
+            )
+        except ValueError as ve:
+            raise HTTPException(status_code=422, detail=str(ve))
 
     if not transactions:
         raise HTTPException(
@@ -75,14 +82,17 @@ async def upload_statement(
     upload_id = str(uuid.uuid4())
     created = 0
     skipped = 0
+    label = account_label.strip() if account_label and account_label.strip() else None
 
     for idx, pt in enumerate(transactions):
+        # Override account_label if user provided one
+        tagged = pt.model_copy(update={"account_label": label}) if label else pt
         message_id = f"stmt_{upload_id}_{idx}"
         try:
             txn = await create_transaction(
                 db=db,
                 user_id=current_user.id,
-                parsed_transaction=pt,
+                parsed_transaction=tagged,
                 message_id=message_id,
             )
             if txn:
@@ -109,6 +119,7 @@ async def upload_statement(
 @router.post("/preview")
 async def preview_statement(
     file: UploadFile = File(...),
+    pdf_password: str | None = Form(None, description="Password for password-protected PDF statements"),
     current_user: User = Depends(get_current_user),
 ):
     """
@@ -141,7 +152,12 @@ async def preview_statement(
     if ext == ".csv":
         transactions = parse_csv_statement(content, file.filename)
     else:
-        transactions = parse_pdf_statement(content, file.filename)
+        try:
+            transactions = parse_pdf_statement(
+                content, file.filename, password=pdf_password.strip() if pdf_password else None
+            )
+        except ValueError as ve:
+            raise HTTPException(status_code=422, detail=str(ve))
 
     if not transactions:
         raise HTTPException(

@@ -38,6 +38,7 @@ async def list_transactions(
     end_date: Optional[str] = Query(None, description="Filter by end date (YYYY-MM-DD)"),
     merchant: Optional[str] = Query(None, description="Filter by merchant name"),
     bank_name: Optional[str] = Query(None, description="Filter by bank name"),
+    account_label: Optional[str] = Query(None, description="Filter by account/card label"),
     min_amount: Optional[float] = Query(None, ge=0, description="Minimum transaction amount"),
     max_amount: Optional[float] = Query(None, ge=0, description="Maximum transaction amount"),
     sort_by: str = Query("transaction_date", description="Field to sort by"),
@@ -71,11 +72,12 @@ async def list_transactions(
             "end_date": end_date,
             "merchant": merchant,
             "bank_name": bank_name,
+            "account_label": account_label,
             "min_amount": min_amount,
             "max_amount": max_amount
         }
     )
-    
+
     # Build filter params
     filters = TransactionFilterParams(
         transaction_type=transaction_type,
@@ -83,10 +85,11 @@ async def list_transactions(
         end_date=end_date,
         merchant=merchant,
         bank_name=bank_name,
+        account_label=account_label,
         min_amount=min_amount,
         max_amount=max_amount
     )
-    
+
     # Get transactions from service
     transactions, total = await get_transactions(
         db=db,
@@ -109,6 +112,7 @@ async def list_transactions(
             merchant=t.merchant,
             transaction_date=t.transaction_date,
             bank_name=t.bank_name,
+            account_label=t.account_label,
             gmail_message_id=t.gmail_message_id,
             created_at=t.created_at
         )
@@ -141,6 +145,7 @@ async def export_transactions_csv(
     end_date: Optional[str] = Query(None, description="Filter by end date (YYYY-MM-DD)"),
     merchant: Optional[str] = Query(None, description="Filter by merchant name"),
     bank_name: Optional[str] = Query(None, description="Filter by bank name"),
+    account_label: Optional[str] = Query(None, description="Filter by account/card label"),
     min_amount: Optional[float] = Query(None, ge=0, description="Minimum transaction amount"),
     max_amount: Optional[float] = Query(None, ge=0, description="Maximum transaction amount"),
     db: AsyncSession = Depends(get_db),
@@ -181,10 +186,11 @@ async def export_transactions_csv(
         end_date=end_date,
         merchant=merchant,
         bank_name=bank_name,
+        account_label=account_label,
         min_amount=min_amount,
         max_amount=max_amount
     )
-    
+
     # Get all transactions (no pagination for export)
     transactions, total = await get_transactions(
         db=db,
@@ -208,9 +214,10 @@ async def export_transactions_csv(
         "Currency",
         "Merchant",
         "Bank",
+        "Account/Card",
         "Created At"
     ])
-    
+
     # Write data rows
     for t in transactions:
         writer.writerow([
@@ -220,6 +227,7 @@ async def export_transactions_csv(
             t.currency,
             t.merchant or "",
             t.bank_name or "",
+            t.account_label or "",
             t.created_at.strftime("%Y-%m-%d %H:%M:%S")
         ])
     

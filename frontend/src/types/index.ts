@@ -14,6 +14,7 @@ export interface Transaction {
   merchant: string | null;
   transaction_date: string;
   bank_name: string | null;
+  account_label: string | null;  // e.g. "HDFC Credit Card", "ICICI Savings"
   gmail_message_id: string;
   created_at: string;
 }
