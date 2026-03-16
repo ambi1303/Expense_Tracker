@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Response, status
 from fastapi.responses import RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from typing import Optional
 import uuid
 
 from app.database import get_db
@@ -21,6 +22,9 @@ from app.auth.middleware import get_current_user
 from app.schemas.user import UserResponse
 from app.schemas.auth import LogoutResponse
 import os
+import structlog
+
+logger = structlog.get_logger()
 
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
@@ -97,9 +101,10 @@ async def google_auth():
 
 @router.get("/callback")
 async def google_callback(
-    code: str,
-    state: str,
-    response: Response,
+    code: Optional[str] = None,
+    state: Optional[str] = None,
+    error: Optional[str] = None,
+    error_description: Optional[str] = None,
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -107,43 +112,71 @@ async def google_callback(
     
     Validates the state parameter, exchanges the authorization code for tokens,
     creates or updates the user in the database, encrypts the refresh token,
-    generates a session JWT, and sets it as an HTTPOnly secure cookie.
+    generates a session JWT, and redirects to frontend with token.
     
-    Args:
-        code: Authorization code from Google OAuth.
-        state: CSRF state parameter from Google OAuth.
-        response: FastAPI response object for setting cookies.
-        db: Database session dependency.
-        
-    Returns:
-        RedirectResponse: Redirect to frontend dashboard.
+    Handles OAuth error redirects (user denied, etc.) by redirecting to login.
     """
+    frontend_url = os.getenv("FRONTEND_URL", "http://localhost:5173")
+
+    logger.info("auth_callback_entry", has_code=bool(code), has_state=bool(state), error=error, error_description=error_description)
+    
+    # OAuth error case: user denied or Google returned an error
+    if error:
+        _msg = error_description or error
+        _redirect = f"{frontend_url}/login?error={_msg.replace(' ', '+')}" if _msg else f"{frontend_url}/login"
+        return RedirectResponse(url=_redirect)
+    
+    if not code or not state:
+        logger.warning("auth_callback_missing_params", has_code=bool(code), has_state=bool(state))
+        return RedirectResponse(url=f"{frontend_url}/login?error=Missing+code+or+state")
+    
     try:
         # Validate CSRF state parameter
         from app.auth.oauth import validate_and_consume_state
+        logger.info("auth_callback_step", step="validate_state")
         if not validate_and_consume_state(state):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid or expired state parameter"
-            )
+            logger.warning("auth_callback_invalid_state")
+            return RedirectResponse(url=f"{frontend_url}/login?error=Invalid+or+expired+session")
+        logger.info("auth_callback_step", step="state_valid")
         
-        # Exchange authorization code for tokens
+        # Exchange authorization code for tokens (includes gmail.readonly scope, token exchange, user info from ID token)
+        logger.info("auth_callback_step", step="token_exchange_start")
         oauth_result = handle_oauth_callback(code)
+        logger.info("auth_callback_step", step="token_exchange_ok", has_access_token=bool(oauth_result.get("access_token")), has_refresh_token=bool(oauth_result.get("refresh_token")), has_email=bool(oauth_result.get("email")), has_google_id=bool(oauth_result.get("google_id")))
         
-        access_token = oauth_result["access_token"]
+        email = oauth_result.get("email")
+        name = oauth_result.get("name")
+        google_id = oauth_result.get("google_id")
+        logger.info("auth_callback_step", step="user_info_extract", email=email, name=name, google_id=google_id)
+        if not google_id:
+            logger.error("auth_callback_user_info_failure", reason="missing_google_id")
+            raise ValueError("Google did not return user ID")
+        if not email:
+            logger.error("auth_callback_user_info_failure", reason="missing_email")
+            raise ValueError("Google did not return email")
+        
         refresh_token = oauth_result["refresh_token"]
-        email = oauth_result["email"]
-        name = oauth_result["name"]
-        google_id = oauth_result["google_id"]
+        name = name or email.split("@")[0]  # Fallback if name missing
         
         # Encrypt refresh token before storing
+        logger.info("auth_callback_step", step="encrypt_token")
         encrypted_refresh_token = encrypt_refresh_token(refresh_token)
         
-        # Check if user already exists
-        result = await db.execute(
-            select(User).where(User.google_id == google_id)
-        )
-        user = result.scalar_one_or_none()
+        # Check if user already exists (requires users table - run: alembic upgrade head)
+        logger.info("auth_callback_step", step="db_lookup")
+        try:
+            result = await db.execute(
+                select(User).where(User.google_id == google_id)
+            )
+            user = result.scalar_one_or_none()
+        except Exception as db_err:
+            err_str = str(db_err).lower()
+            if "does not exist" in err_str or "relation" in err_str or "table" in err_str:
+                logger.error("auth_callback_db_error", error=str(db_err), hint="Database table missing - run: alembic upgrade head")
+            else:
+                logger.error("auth_callback_db_error", error=str(db_err), error_type=type(db_err).__name__)
+            raise
+        logger.info("auth_callback_step", step="db_lookup_ok", user_exists=user is not None)
         
         if user:
             # Update existing user's refresh token
@@ -161,36 +194,39 @@ async def google_callback(
             )
             db.add(user)
         
-        await db.commit()
-        await db.refresh(user)
+        logger.info("auth_callback_step", step="db_commit")
+        try:
+            await db.commit()
+            await db.refresh(user)
+        except Exception as db_err:
+            err_str = str(db_err).lower()
+            if "does not exist" in err_str or "relation" in err_str or "table" in err_str:
+                logger.error("auth_callback_db_commit_error", error=str(db_err), hint="Database table missing - run: alembic upgrade head")
+            else:
+                logger.error("auth_callback_db_commit_error", error=str(db_err), error_type=type(db_err).__name__)
+            raise
+        logger.info("auth_callback_step", step="db_commit_ok", user_id=str(user.id))
         
         # Generate JWT session token
+        logger.info("auth_callback_step", step="jwt_create")
         session_token = create_session_token(str(user.id), user.email)
 
         # Redirect to frontend auth-complete with token in URL.
         # Cookie cannot persist across cross-origin redirect (backend -> frontend),
         # so frontend calls /auth/set-session to set the cookie.
-        frontend_url = os.getenv("FRONTEND_URL", "http://localhost:5173")
         redirect_response = RedirectResponse(
             url=f"{frontend_url}/auth/complete?token={session_token}"
         )
 
         return redirect_response
         
+    except HTTPException:
+        raise  # Re-raise HTTPExceptions (e.g. 400) as-is, don't convert to 500
     except ValueError as e:
-        # OAuth or token errors
-        import structlog
-        logger = structlog.get_logger()
-        logger.error("oauth_callback_error", error=str(e), error_type="ValueError")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"OAuth callback failed: {str(e)}"
-        )
+        logger.error("auth_callback_value_error", error=str(e), error_type="ValueError")
+        return RedirectResponse(url=f"{frontend_url}/login?error=OAuth+failed")
     except Exception as e:
-        # Database or other errors
-        import structlog
-        logger = structlog.get_logger()
-        logger.error("oauth_callback_error", error=str(e), error_type=type(e).__name__)
+        logger.error("auth_callback_exception", error=str(e), error_type=type(e).__name__, exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Authentication failed: {str(e)}"

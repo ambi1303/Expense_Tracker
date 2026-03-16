@@ -10,6 +10,7 @@ import secrets
 import time
 from threading import Lock
 from typing import Dict
+import structlog
 from google_auth_oauthlib.flow import Flow
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
@@ -27,6 +28,7 @@ SCOPES = [
 
 # In-memory CSRF state store: {state: expiration_timestamp}
 _oauth_state_store: Dict[str, float] = {}
+_oauth_logger = structlog.get_logger()
 _state_store_lock = Lock()
 STATE_TTL_SECONDS = 600  # 10 minutes
 
@@ -181,36 +183,39 @@ def handle_oauth_callback(code: str) -> Dict[str, str]:
         }
     }
     
-    # Create the flow
+    # Create the flow (SCOPES include gmail.readonly, userinfo.email, userinfo.profile)
     flow = Flow.from_client_config(
         client_config,
         scopes=SCOPES,
         redirect_uri=config["redirect_uri"]
     )
-    
+    _oauth_logger.info("oauth_token_exchange_start", redirect_uri=config["redirect_uri"], scopes=SCOPES)
+
     try:
-        # Exchange code for tokens
+        # Step 1: Exchange code for tokens (can fail: invalid code, redirect_uri mismatch, scope issues)
+        _oauth_logger.info("oauth_step", step="fetch_token")
         flow.fetch_token(code=code)
-        
-        # Get credentials
         credentials = flow.credentials
-        
+        _oauth_logger.info("oauth_step", step="fetch_token_ok", has_access_token=bool(credentials.token), has_refresh_token=bool(credentials.refresh_token), has_id_token=bool(credentials.id_token))
+
         if not credentials.refresh_token:
+            _oauth_logger.error("oauth_token_exchange_failure", reason="no_refresh_token", hint="User may need to revoke app access and re-consent with prompt=consent")
             raise ValueError("No refresh token received. User may need to revoke access and re-authenticate.")
-        
-        # Get user info from ID token
+
+        # Step 2: Get user info from ID token (can fail: invalid token, wrong audience, expired)
+        _oauth_logger.info("oauth_step", step="verify_id_token")
         import google.auth.transport.requests
         import google.oauth2.id_token
-        
+
         request = google.auth.transport.requests.Request()
-        # Add clock skew tolerance of 10 seconds
         id_info = google.oauth2.id_token.verify_oauth2_token(
             credentials.id_token,
             request,
             config["client_id"],
             clock_skew_in_seconds=10
         )
-        
+        _oauth_logger.info("oauth_step", step="verify_id_token_ok", email=id_info.get("email"), sub=id_info.get("sub"))
+
         return {
             "access_token": credentials.token,
             "refresh_token": credentials.refresh_token,
@@ -218,8 +223,11 @@ def handle_oauth_callback(code: str) -> Dict[str, str]:
             "name": id_info.get("name"),
             "google_id": id_info.get("sub")
         }
-        
+
+    except ValueError:
+        raise  # Re-raise ValueError as-is
     except Exception as e:
+        _oauth_logger.error("oauth_token_exchange_failure", error=str(e), error_type=type(e).__name__, exc_info=True)
         raise ValueError(f"Token exchange failed: {str(e)}")
 
 

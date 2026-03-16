@@ -18,12 +18,13 @@ from app.routes import transactions
 from app.routes import analytics
 from app.routes import sync
 
-# Configure structured logging
+# Configure structured logging (dev: human-friendly console; prod: JSON)
+_is_prod = os.getenv("ENVIRONMENT", "development") == "production"
 structlog.configure(
     processors=[
         structlog.processors.TimeStamper(fmt="iso"),
         structlog.processors.add_log_level,
-        structlog.processors.JSONRenderer()
+        structlog.dev.ConsoleRenderer() if not _is_prod else structlog.processors.JSONRenderer()
     ]
 )
 

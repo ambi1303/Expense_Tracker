@@ -1,9 +1,12 @@
 import React from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { API_BASE_URL } from '../services/api';
 
 const Login: React.FC = () => {
   const { login } = useAuth();
+  const [searchParams] = useSearchParams();
+  const errorParam = searchParams.get('error');
   const authUrl = `${API_BASE_URL.replace(/\/$/, '')}/auth/google`;
 
   return (
@@ -20,6 +23,11 @@ const Login: React.FC = () => {
           </div>
 
           <div className="space-y-6">
+            {errorParam && (
+              <div className="p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg text-red-700 dark:text-red-400 text-sm">
+                {decodeURIComponent(errorParam.replace(/\+/g, ' '))}
+              </div>
+            )}
             <a
               href={authUrl}
               onClick={(e) => { e.preventDefault(); login(); }}

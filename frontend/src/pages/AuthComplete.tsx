@@ -31,10 +31,12 @@ const AuthComplete: React.FC = () => {
 
         // Redirect to dashboard
         navigate('/dashboard');
-      } catch (err) {
+      } catch (err: unknown) {
         console.error('Auth completion failed:', err);
-        setError('Authentication failed. Please try again.');
-        setTimeout(() => navigate('/login'), 2000);
+        const axiosErr = err as { response?: { data?: { detail?: string }; status?: number } };
+        const detail = axiosErr?.response?.data?.detail;
+        setError(detail && typeof detail === 'string' ? detail : 'Authentication failed. Please try again.');
+        setTimeout(() => navigate('/login'), 3000);
       }
     };
 

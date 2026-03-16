@@ -13,6 +13,9 @@ const api = axios.create({
 api.interceptors.response.use(
   (response) => response,
   (error) => {
+    if (error.response?.status === 500 && import.meta.env.DEV) {
+      console.error('[API 500]', error.config?.url, error.response?.data);
+    }
     if (error.response?.status === 401) {
       const currentPath = window.location.pathname;
       if (currentPath !== '/login') {
