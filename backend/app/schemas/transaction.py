@@ -28,6 +28,7 @@ class TransactionBase(BaseModel):
     transaction_date: datetime = Field(..., description="Transaction date and time")
     bank_name: Optional[str] = Field(None, max_length=255, description="Bank name")
     account_label: Optional[str] = Field(None, max_length=128, description="Account/card label e.g. HDFC Credit Card")
+    category: Optional[str] = Field(None, max_length=100, description="Transaction category (e.g. Food, Shopping)")
     
     @field_validator('amount')
     @classmethod
@@ -94,6 +95,7 @@ class TransactionFilterParams(BaseModel):
     merchant: Optional[str] = Field(None, max_length=255, description="Filter by merchant name (partial match)")
     bank_name: Optional[str] = Field(None, max_length=255, description="Filter by bank name")
     account_label: Optional[str] = Field(None, max_length=128, description="Filter by account/card label")
+    category: Optional[str] = Field(None, max_length=100, description="Filter by category")
     min_amount: Optional[Decimal] = Field(None, gt=0, description="Minimum transaction amount")
     max_amount: Optional[Decimal] = Field(None, gt=0, description="Maximum transaction amount")
     

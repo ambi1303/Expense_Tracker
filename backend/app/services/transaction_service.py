@@ -213,7 +213,10 @@ async def get_transactions(
 
         if filters.account_label:
             query = query.where(Transaction.account_label.ilike(f"%{filters.account_label}%"))
-        
+
+        if filters.category:
+            query = query.where(Transaction.category.ilike(f"%{filters.category}%"))
+
         if filters.min_amount:
             query = query.where(Transaction.amount >= filters.min_amount)
         
@@ -313,6 +316,60 @@ async def get_transaction_by_id(
     transaction = result.scalar_one_or_none()
     
     return transaction
+
+
+async def update_transaction_category(
+    db: AsyncSession,
+    transaction_id: UUID,
+    user_id: UUID,
+    category: str | None
+) -> Optional[Transaction]:
+    """Update a transaction's category. Pass None to clear."""
+    txn = await get_transaction_by_id(db, transaction_id, user_id)
+    if not txn:
+        return None
+    txn.category = category.strip() if category and category.strip() else None
+    await db.commit()
+    await db.refresh(txn)
+    return txn
+
+
+async def find_potential_duplicates(
+    db: AsyncSession,
+    user_id: UUID
+) -> list[list[Transaction]]:
+    """
+    Find groups of potentially duplicate transactions.
+    Same user, same amount, same date (day), different message_id.
+    """
+    from sqlalchemy import cast, Date
+    from datetime import date
+
+    # Get all transactions for user
+    q = select(Transaction).where(
+        Transaction.user_id == user_id
+    ).order_by(Transaction.transaction_date.desc())
+    result = await db.execute(q)
+    all_txns = list(result.scalars().all())
+
+    # Group by (date, amount) - same day + same amount = potential duplicate
+    groups: dict[tuple[date, str], list[Transaction]] = {}
+    for t in all_txns:
+        d = t.transaction_date.date() if hasattr(t.transaction_date, 'date') else t.transaction_date
+        amt = str(t.amount)
+        key = (d, amt)
+        if key not in groups:
+            groups[key] = []
+        groups[key].append(t)
+
+    # Keep only groups with 2+ transactions (and different message_ids)
+    duplicates = []
+    for group in groups.values():
+        if len(group) >= 2:
+            ids = {t.gmail_message_id for t in group}
+            if len(ids) > 1:  # Different sources
+                duplicates.append(group)
+    return duplicates
 
 
 async def delete_transaction(

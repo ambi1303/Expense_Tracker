@@ -4,7 +4,7 @@ Transaction routes for the expense tracker API.
 This module provides endpoints for retrieving and exporting transactions.
 """
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Path, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Optional
 from datetime import datetime
@@ -16,16 +16,29 @@ import structlog
 from app.database import get_db
 from app.auth.middleware import get_current_user
 from app.models.user import User
-from app.services.transaction_service import get_transactions
+from app.services.transaction_service import (
+    get_transactions,
+    get_transaction_by_id,
+    update_transaction_category,
+    find_potential_duplicates,
+    delete_transaction,
+)
 from app.schemas.transaction import (
     TransactionListResponse,
     TransactionResponse,
     TransactionFilterParams
 )
 from app.services.email_parser import TransactionType
+from pydantic import BaseModel
 
 
 logger = structlog.get_logger()
+
+
+class TransactionCategoryUpdate(BaseModel):
+    category: Optional[str] = None
+
+
 router = APIRouter(prefix="/transactions", tags=["transactions"])
 
 
@@ -39,6 +52,7 @@ async def list_transactions(
     merchant: Optional[str] = Query(None, description="Filter by merchant name"),
     bank_name: Optional[str] = Query(None, description="Filter by bank name"),
     account_label: Optional[str] = Query(None, description="Filter by account/card label"),
+    category: Optional[str] = Query(None, description="Filter by category"),
     min_amount: Optional[float] = Query(None, ge=0, description="Minimum transaction amount"),
     max_amount: Optional[float] = Query(None, ge=0, description="Maximum transaction amount"),
     sort_by: str = Query("transaction_date", description="Field to sort by"),
@@ -73,6 +87,7 @@ async def list_transactions(
             "merchant": merchant,
             "bank_name": bank_name,
             "account_label": account_label,
+            "category": category,
             "min_amount": min_amount,
             "max_amount": max_amount
         }
@@ -86,6 +101,7 @@ async def list_transactions(
         merchant=merchant,
         bank_name=bank_name,
         account_label=account_label,
+        category=category,
         min_amount=min_amount,
         max_amount=max_amount
     )
@@ -113,6 +129,7 @@ async def list_transactions(
             transaction_date=t.transaction_date,
             bank_name=t.bank_name,
             account_label=t.account_label,
+            category=t.category,
             gmail_message_id=t.gmail_message_id,
             created_at=t.created_at
         )
@@ -138,6 +155,81 @@ async def list_transactions(
     )
 
 
+@router.patch("/{transaction_id}", response_model=TransactionResponse)
+async def update_transaction(
+    transaction_id: str,
+    data: TransactionCategoryUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Update a transaction's category."""
+    from uuid import UUID
+    try:
+        tid = UUID(transaction_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid transaction ID")
+    txn = await update_transaction_category(db, tid, current_user.id, data.category)
+    if not txn:
+        raise HTTPException(status_code=404, detail="Transaction not found")
+    return TransactionResponse(
+        id=txn.id,
+        user_id=txn.user_id,
+        amount=txn.amount,
+        currency=txn.currency,
+        transaction_type=TransactionType(txn.transaction_type),
+        merchant=txn.merchant,
+        transaction_date=txn.transaction_date,
+        bank_name=txn.bank_name,
+        account_label=txn.account_label,
+        category=txn.category,
+        gmail_message_id=txn.gmail_message_id,
+        created_at=txn.created_at
+    )
+
+
+@router.get("/duplicates")
+async def get_duplicates(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Get groups of potentially duplicate transactions."""
+    groups = await find_potential_duplicates(db, current_user.id)
+    return {
+        "groups": [
+            [
+                {
+                    "id": str(t.id),
+                    "amount": str(t.amount),
+                    "merchant": t.merchant,
+                    "transaction_date": t.transaction_date.isoformat() if t.transaction_date else None,
+                    "category": t.category,
+                    "gmail_message_id": (t.gmail_message_id[:20] + "...") if (t.gmail_message_id and len(t.gmail_message_id) > 20) else t.gmail_message_id,
+                }
+                for t in group
+            ]
+            for group in groups
+        ]
+    }
+
+
+@router.delete("/{transaction_id}")
+async def remove_transaction(
+    transaction_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Delete a transaction (e.g. duplicate)."""
+    from uuid import UUID
+    try:
+        tid = UUID(transaction_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid transaction ID")
+    ok = await delete_transaction(db, tid, current_user.id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Transaction not found")
+    return {"success": True}
+
+
 @router.get("/export")
 async def export_transactions_csv(
     transaction_type: Optional[TransactionType] = Query(None, description="Filter by transaction type"),
@@ -146,6 +238,7 @@ async def export_transactions_csv(
     merchant: Optional[str] = Query(None, description="Filter by merchant name"),
     bank_name: Optional[str] = Query(None, description="Filter by bank name"),
     account_label: Optional[str] = Query(None, description="Filter by account/card label"),
+    category: Optional[str] = Query(None, description="Filter by category"),
     min_amount: Optional[float] = Query(None, ge=0, description="Minimum transaction amount"),
     max_amount: Optional[float] = Query(None, ge=0, description="Maximum transaction amount"),
     db: AsyncSession = Depends(get_db),
@@ -187,6 +280,7 @@ async def export_transactions_csv(
         merchant=merchant,
         bank_name=bank_name,
         account_label=account_label,
+        category=category,
         min_amount=min_amount,
         max_amount=max_amount
     )
@@ -215,6 +309,7 @@ async def export_transactions_csv(
         "Merchant",
         "Bank",
         "Account/Card",
+        "Category",
         "Created At"
     ])
 
@@ -228,6 +323,7 @@ async def export_transactions_csv(
             t.merchant or "",
             t.bank_name or "",
             t.account_label or "",
+            t.category or "",
             t.created_at.strftime("%Y-%m-%d %H:%M:%S")
         ])
     
