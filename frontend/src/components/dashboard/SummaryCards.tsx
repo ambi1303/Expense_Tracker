@@ -1,23 +1,25 @@
 import React from 'react';
 import { Summary } from '../../types';
 import { format } from 'date-fns';
+import { formatAmount } from '../../utils/currency';
 
 interface SummaryCardsProps {
   summary: Summary;
+  currency?: string;
 }
 
-const SummaryCards: React.FC<SummaryCardsProps> = ({ summary }) => {
+const SummaryCards: React.FC<SummaryCardsProps> = ({ summary, currency = 'INR' }) => {
   const cards = [
     {
       title: 'Total Spent',
-      value: `₹${parseFloat(summary.total_spent).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+      value: formatAmount(summary.total_spent, currency),
       icon: '💸',
       color: 'text-red-600 dark:text-red-400',
       bgColor: 'bg-red-50 dark:bg-red-900/20',
     },
     {
       title: 'Total Received',
-      value: `₹${parseFloat(summary.total_received).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+      value: formatAmount(summary.total_received, currency),
       icon: '💰',
       color: 'text-green-600 dark:text-green-400',
       bgColor: 'bg-green-50 dark:bg-green-900/20',

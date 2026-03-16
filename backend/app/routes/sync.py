@@ -12,6 +12,7 @@ from typing import List
 from datetime import datetime
 from slowapi import Limiter
 from slowapi.util import get_remote_address
+import os
 import structlog
 
 from app.database import get_db
@@ -127,12 +128,14 @@ async def trigger_manual_sync(
         except Exception:
             pass
         
+        # Sanitize error in production to avoid information disclosure
+        error_detail = None if os.getenv("ENVIRONMENT") == "production" else str(e)
         return SyncResponse(
             success=False,
             emails_processed=0,
             transactions_created=0,
-            message="Sync failed due to an error",
-            error=str(e)
+            message="Sync failed due to an error. Please try again later.",
+            error=error_detail
         )
 
 

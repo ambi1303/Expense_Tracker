@@ -24,8 +24,40 @@ logger = structlog.get_logger()
 _executor = ThreadPoolExecutor(max_workers=10)
 
 
-# Search query for transaction emails
+# Search query for transaction emails (content keywords)
 TRANSACTION_SEARCH_QUERY = '("INR" OR "Rs" OR "debited" OR "credited")'
+
+# Sender domains to narrow search (opt-in via GMAIL_BANK_DOMAINS env)
+# Format: comma-separated, e.g. "hdfcbank.com,icicibank.com,sbi.co.in"
+# If unset or empty, no sender filter (broader search, more results)
+_bank_domains_env = os.getenv("GMAIL_BANK_DOMAINS", "")
+BANK_SENDER_DOMAINS = [d.strip().lower() for d in _bank_domains_env.split(",") if d.strip()]
+
+# Max concurrent fetches for email content (avoid rate limits)
+MAX_CONCURRENT_FETCHES = int(os.getenv("GMAIL_MAX_CONCURRENT_FETCHES", "10"))
+
+# Retries for individual email fetch failures
+FETCH_CONTENT_RETRIES = int(os.getenv("GMAIL_FETCH_RETRIES", "3"))
+
+
+def _build_search_query(last_sync_time: Optional[datetime], is_first_sync: bool) -> str:
+    """
+    Build Gmail search query with optional date filter and sender filter.
+    Uses Unix timestamp for 'after:' to avoid timezone ambiguity (Gmail uses PST for YYYY/MM/DD).
+    """
+    parts = [TRANSACTION_SEARCH_QUERY]
+    
+    # Date filter: use Unix timestamp for precise timezone-agnostic filtering
+    if last_sync_time:
+        ts = int(last_sync_time.timestamp())
+        parts.append(f"after:{ts}")
+    
+    # Sender filter: narrow to known bank domains when configured
+    if BANK_SENDER_DOMAINS:
+        from_query = " OR ".join(f"from:{d}" for d in BANK_SENDER_DOMAINS)
+        parts.append(f"({from_query})")
+    
+    return " ".join(parts)
 
 
 def get_gmail_service(access_token: str):
@@ -53,6 +85,13 @@ def get_gmail_service(access_token: str):
     return service
 
 
+# First sync: fetch up to this many emails (full backfill)
+FIRST_SYNC_MAX_RESULTS = int(os.getenv("GMAIL_FIRST_SYNC_MAX", "10000"))
+
+# Incremental sync: cap per run to avoid long syncs
+INCREMENTAL_SYNC_MAX_RESULTS = int(os.getenv("GMAIL_INCREMENTAL_SYNC_MAX", "500"))
+
+
 @retry(
     stop=stop_after_attempt(3),
     wait=wait_exponential(multiplier=1, min=2, max=10),
@@ -61,65 +100,55 @@ def get_gmail_service(access_token: str):
 async def fetch_transaction_emails(
     access_token: str,
     last_sync_time: Optional[datetime] = None,
-    max_results: int = 500
+    max_results: Optional[int] = None
 ) -> List[Dict[str, any]]:
     """
     Fetch transaction-related emails from Gmail with pagination support.
     
-    Uses the search query: ("INR" OR "Rs" OR "debited" OR "credited")
-    to find emails that likely contain transaction information.
+    - First sync (last_sync_time=None): Fetches up to FIRST_SYNC_MAX_RESULTS,
+      paginating through all pages to import historical data.
+    - Incremental sync: Fetches emails after last_sync_time, capped at
+      INCREMENTAL_SYNC_MAX_RESULTS.
     
-    Implements nextPageToken pagination to fetch all emails beyond the 100-message limit.
-    Uses async execution with ThreadPoolExecutor to avoid blocking the event loop.
-    
-    This function includes retry logic with exponential backoff for handling
-    transient Gmail API errors.
+    Uses Unix timestamp for date filter to avoid timezone issues.
+    Fetches email content in parallel with bounded concurrency and per-message retries.
     
     Args:
         access_token: Valid OAuth access token for Gmail API.
         last_sync_time: Optional datetime to fetch emails after this time.
-        max_results: Maximum number of emails to fetch (default 500).
+        max_results: Override max results (default: auto based on first vs incremental).
         
     Returns:
         List of dictionaries containing message_id, subject, body, and date.
-        
-    Raises:
-        ValueError: If access token is invalid.
-        HttpError: If Gmail API request fails after retries.
     """
-    logger.info("fetch_transaction_emails_started", 
+    is_first_sync = last_sync_time is None
+    effective_max = max_results or (
+        FIRST_SYNC_MAX_RESULTS if is_first_sync else INCREMENTAL_SYNC_MAX_RESULTS
+    )
+    
+    logger.info("fetch_transaction_emails_started",
                last_sync_time=last_sync_time,
-               max_results=max_results)
+               is_first_sync=is_first_sync,
+               max_results=effective_max)
     
     try:
-        # Wrap synchronous Gmail API calls in executor to avoid blocking event loop
         loop = asyncio.get_event_loop()
         
         def _fetch_message_ids_sync():
             """Synchronous function to fetch message IDs with pagination."""
             service = get_gmail_service(access_token)
-            
-            # Build search query
-            query = TRANSACTION_SEARCH_QUERY
-            
-            # Add date filter if last_sync_time is provided
-            if last_sync_time:
-                # Format: after:YYYY/MM/DD
-                date_str = last_sync_time.strftime("%Y/%m/%d")
-                query += f" after:{date_str}"
+            query = _build_search_query(last_sync_time, is_first_sync)
             
             logger.info("gmail_api_search", query=query)
             
-            # Pagination loop to fetch all messages
             all_messages = []
             next_page_token = None
             
-            while len(all_messages) < max_results:
-                # Fetch page
+            while len(all_messages) < effective_max:
                 results = service.users().messages().list(
                     userId='me',
                     q=query,
-                    maxResults=min(100, max_results - len(all_messages)),
+                    maxResults=min(100, effective_max - len(all_messages)),
                     pageToken=next_page_token
                 ).execute()
                 
@@ -130,36 +159,53 @@ async def fetch_transaction_emails(
                            page_count=len(messages),
                            total_count=len(all_messages))
                 
-                # Check for next page
                 next_page_token = results.get('nextPageToken')
                 if not next_page_token:
-                    break  # No more pages
+                    break
             
             logger.info("gmail_api_search_complete", message_count=len(all_messages))
             return all_messages
         
-        # Execute synchronous fetch in thread pool
         all_messages = await loop.run_in_executor(_executor, _fetch_message_ids_sync)
         
-        # Fetch full content for each message (asynchronously)
+        # Fetch full content in parallel with bounded concurrency
+        sem = asyncio.Semaphore(MAX_CONCURRENT_FETCHES)
+        
+        async def _fetch_with_retry(msg: dict) -> Optional[Dict]:
+            message_id = msg['id']
+            last_error = None
+            for attempt in range(FETCH_CONTENT_RETRIES):
+                try:
+                    async with sem:
+                        return await get_email_content(access_token, message_id)
+                except Exception as e:
+                    last_error = e
+                    if attempt < FETCH_CONTENT_RETRIES - 1:
+                        await asyncio.sleep(2 ** attempt)  # Backoff
+                    else:
+                        logger.error(
+                            "failed_to_fetch_email_content",
+                            message_id=message_id,
+                            error=str(e),
+                            attempts=FETCH_CONTENT_RETRIES
+                        )
+            return None
+        
+        tasks = [_fetch_with_retry(m) for m in all_messages]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        
         emails = []
-        for message in all_messages:
-            message_id = message['id']
-            
-            try:
-                email_data = await get_email_content(access_token, message_id)
-                emails.append(email_data)
-            except Exception as e:
+        for i, r in enumerate(results):
+            if isinstance(r, Exception):
                 logger.error(
-                    "failed_to_fetch_email_content",
-                    message_id=message_id,
-                    error=str(e)
+                    "fetch_task_exception",
+                    message_id=all_messages[i]['id'],
+                    error=str(r)
                 )
-                # Continue with other emails
-                continue
+            elif r is not None:
+                emails.append(r)
         
         logger.info("fetch_transaction_emails_complete", emails_fetched=len(emails))
-        
         return emails
         
     except HttpError as e:

@@ -53,6 +53,10 @@ DATABASE_URL = urlunparse((
     parsed.fragment
 ))
 
+# SSL: require for Neon/cloud; set DATABASE_SSL=false for local postgres without SSL
+_require_ssl = os.getenv("DATABASE_SSL", "true").lower() not in ("false", "0", "no")
+_connect_args = {"ssl": "require"} if _require_ssl else {}
+
 # Create async engine with Neon-optimized connection pooling
 engine = create_async_engine(
     DATABASE_URL,
@@ -61,9 +65,7 @@ engine = create_async_engine(
     max_overflow=20,  # Maximum number of connections that can be created beyond pool_size
     pool_pre_ping=True,  # Verify connections before using them (handles Neon idle timeout)
     pool_recycle=3600,  # Recycle connections after 1 hour to prevent stale connections
-    connect_args={
-        "ssl": "require",  # Neon requires SSL connections
-    },
+    connect_args=_connect_args,
 )
 
 # Create async session factory

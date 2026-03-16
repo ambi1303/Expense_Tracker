@@ -1,14 +1,17 @@
 import React from 'react';
 import { PieChart, Pie, Cell, ResponsiveContainer, Legend, Tooltip } from 'recharts';
 import { CategoryData } from '../../types';
+import { getCurrencySymbol } from '../../utils/currency';
 
 interface CategoryBreakdownProps {
   data: CategoryData[];
+  currency?: string;
 }
 
 const COLORS = ['#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6'];
 
-const CategoryBreakdown: React.FC<CategoryBreakdownProps> = ({ data }) => {
+const CategoryBreakdown: React.FC<CategoryBreakdownProps> = ({ data, currency = 'INR' }) => {
+  const symbol = getCurrencySymbol(currency);
   const chartData = data.map((item) => ({
     name: item.merchant,
     value: parseFloat(item.amount),
@@ -44,7 +47,7 @@ const CategoryBreakdown: React.FC<CategoryBreakdownProps> = ({ data }) => {
                   border: '1px solid #374151',
                   borderRadius: '8px',
                 }}
-                formatter={(value: number) => `₹${value.toLocaleString('en-IN')}`}
+                formatter={(value: number) => `${symbol}${value.toLocaleString('en-IN')}`}
               />
               <Legend />
             </PieChart>
@@ -62,7 +65,7 @@ const CategoryBreakdown: React.FC<CategoryBreakdownProps> = ({ data }) => {
                   </span>
                 </div>
                 <span className="text-sm font-medium text-gray-900 dark:text-white">
-                  ₹{parseFloat(item.amount).toLocaleString('en-IN')}
+                  {symbol}{parseFloat(item.amount).toLocaleString('en-IN')}
                 </span>
               </div>
             ))}

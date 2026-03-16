@@ -56,16 +56,16 @@ async def get_current_user(
                 headers={"WWW-Authenticate": "Bearer"}
             )
         
-    except JWTError as e:
+    except JWTError:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=f"Invalid or expired token: {str(e)}",
+            detail="Invalid or expired token",
             headers={"WWW-Authenticate": "Bearer"}
         )
-    except ValueError as e:
+    except ValueError:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=f"Token validation error: {str(e)}",
+            detail="Invalid or expired token",
             headers={"WWW-Authenticate": "Bearer"}
         )
     
@@ -86,9 +86,10 @@ async def get_current_user(
         return user
         
     except Exception as e:
+        import os
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Database error: {str(e)}"
+            detail="Database error" if os.getenv("ENVIRONMENT") == "production" else str(e)
         )
 
 

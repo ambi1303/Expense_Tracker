@@ -3,16 +3,14 @@ Gmail AI Expense Tracker - Main Application Entry Point
 """
 import os
 from dotenv import load_dotenv
-from fastapi import FastAPI, Request, status
+from fastapi import FastAPI, Request, status, HTTPException
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 import structlog
 
-# Load environment variables from .env file (or .evn if that's what exists)
+# Load environment variables from .env file
 if os.path.exists(".env"):
     load_dotenv(".env")
-elif os.path.exists(".evn"):
-    load_dotenv(".evn")
 
 # Import routers
 from app.routes import auth
@@ -95,11 +93,11 @@ app = FastAPI(
     ]
 )
 
-# CORS Configuration
-# TODO: Configure with environment variable for production
+# CORS Configuration (comma-separated CORS_ORIGINS env var)
+_cors_origins = os.getenv("CORS_ORIGINS", "http://localhost:5173").split(",")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],  # Frontend URL
+    allow_origins=[o.strip() for o in _cors_origins if o.strip()],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -111,6 +109,11 @@ app.include_router(transactions.router)
 app.include_router(analytics.router)
 app.include_router(sync.router)
 
+# Wire SlowAPI rate limiter (required for @limiter.limit decorators)
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+app.state.limiter = sync.limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 # Production error handler for sanitizing error messages
 @app.exception_handler(Exception)
@@ -165,47 +168,32 @@ async def debug_database():
     """
     Debug endpoint to check database connection and tables.
     
-    Returns information about:
-    - Database connection status
-    - Connected database name
-    - List of tables in the database
-    - User count
-    - Database host information
+    Disabled in production (set ENABLE_DEBUG_API=true for dev only).
+    Returns minimal status when enabled to avoid information disclosure.
     """
-    from app.database import get_db, engine
+    if os.getenv("ENABLE_DEBUG_API", "false").lower() != "true":
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Not found"
+        )
+
+    from app.database import engine
     from sqlalchemy import text
-    
+
     try:
         async with engine.connect() as conn:
-            # Check current database
             result = await conn.execute(text("SELECT current_database()"))
             db_name = result.scalar()
-            
-            # Check tables
-            result = await conn.execute(text("""
-                SELECT table_name 
-                FROM information_schema.tables 
-                WHERE table_schema = 'public'
-                ORDER BY table_name
-            """))
-            tables = [row[0] for row in result]
-            
-            # Check users count
-            result = await conn.execute(text("SELECT COUNT(*) FROM users"))
-            user_count = result.scalar()
-            
+
             return {
                 "status": "connected",
-                "database": db_name,
-                "tables": tables,
-                "user_count": user_count,
-                "database_url_host": str(engine.url).split('@')[1].split('/')[0] if '@' in str(engine.url) else "N/A"
+                "database": db_name
             }
     except Exception as e:
+        logger.error("debug_db_error", error=str(e), error_type=type(e).__name__)
         return {
             "status": "error",
-            "error": str(e),
-            "error_type": type(e).__name__
+            "message": "Database connection failed"
         }
 
 

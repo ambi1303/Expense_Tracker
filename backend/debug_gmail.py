@@ -9,7 +9,7 @@ from app.models.user import User
 from app.services.gmail_service import fetch_transaction_emails
 from app.services.email_parser import parse_email
 from app.auth.encryption import decrypt_refresh_token
-from app.auth.oauth import refresh_access_token
+from app.auth.oauth import refresh_access_token_async
 
 async def debug_gmail_fetch():
     print("=" * 60)
@@ -33,7 +33,7 @@ async def debug_gmail_fetch():
             # Decrypt and refresh token
             print("\n📝 Refreshing access token...")
             refresh_token = decrypt_refresh_token(user.refresh_token_encrypted)
-            access_token = await refresh_access_token(refresh_token)
+            access_token = await refresh_access_token_async(refresh_token)
             print("✅ Access token refreshed")
             
             # Fetch emails

@@ -4,13 +4,13 @@ uvicorn[standard]==0.24.0
 python-multipart==0.0.6
 
 # Database
-sqlalchemy[asyncio]==2.0.23
-asyncpg==0.29.0
+sqlalchemy[asyncio]>=2.0.30,<3  # 2.0.30+ fixes Python 3.13 TypingOnly __static_attributes__
+asyncpg>=0.30.0  # 0.30+ has Python 3.13 wheels
 alembic==1.12.1
 
-# Data Validation
-pydantic==2.5.0
-pydantic-settings==2.1.0
+# Data Validation (2.10+ has pre-built wheels for Python 3.13; 2.5.x requires Rust on 3.13)
+pydantic[email]>=2.10.0,<2.11
+pydantic-settings>=2.5.0,<2.6
 
 # Authentication & Security
 python-jose[cryptography]==3.3.0
@@ -21,6 +21,9 @@ google-api-python-client==2.108.0
 
 # Scheduling
 apscheduler==3.10.4
+
+# Date/Time (analytics relativedelta, alembic timezone)
+python-dateutil>=2.8.2
 
 # Logging
 structlog==23.2.0
@@ -33,7 +36,7 @@ python-dotenv==1.0.0
 
 # HTML Parsing
 beautifulsoup4==4.12.2
-lxml==4.9.3
+lxml>=5.3.0  # 5.x has Python 3.13 wheels
 
 # Rate Limiting
 slowapi==0.1.9

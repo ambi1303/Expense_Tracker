@@ -20,7 +20,7 @@ from app.models.sync_log import SyncLog
 from app.auth.encryption import decrypt_refresh_token
 from app.auth.oauth import refresh_access_token_async
 from app.services.gmail_service import fetch_transaction_emails, get_email_content
-from app.services.email_parser import parse_email
+from app.services.email_parser import parse_emails
 from app.services.transaction_service import create_transaction, get_processed_message_ids
 
 
@@ -131,41 +131,34 @@ async def sync_user_emails(user: User, session: AsyncSession) -> dict:
             
             for email in new_emails:
                 try:
-                    # Parse email to extract transaction data
-                    parsed = parse_email(
+                    parsed_list = parse_emails(
                         email.get('subject', ''),
                         email.get('body', '')
                     )
                     
-                    if parsed:
-                        # Create transaction in database
+                    for i, parsed in enumerate(parsed_list):
+                        # Use message_id for first; message_id_0, message_id_1 for multiples
+                        msg_id = email['message_id'] if i == 0 else f"{email['message_id']}_{i}"
                         transaction = await create_transaction(
                             db=session,
                             user_id=user.id,
                             parsed_transaction=parsed,
-                            message_id=email['message_id']
+                            message_id=msg_id
                         )
-                        
                         if transaction:
                             transactions_created += 1
                             logger.info(
                                 "transaction_created",
                                 user_id=str(user.id),
                                 transaction_id=str(transaction.id),
-                                message_id=email['message_id']
+                                message_id=msg_id
                             )
                         else:
                             logger.warning(
                                 "transaction_duplicate_skipped",
                                 user_id=str(user.id),
-                                message_id=email['message_id']
+                                message_id=msg_id
                             )
-                    else:
-                        logger.warning(
-                            "email_parse_failed",
-                            user_id=str(user.id),
-                            message_id=email['message_id']
-                        )
                     
                     emails_processed += 1
                     
@@ -218,25 +211,22 @@ async def sync_all_users():
     """
     logger.info("sync_all_users_started")
     
-    # Create a new database session for this job
-    async with AsyncSessionLocal() as session:
-        try:
-            # Fetch all users
-            result = await session.execute(select(User))
+    try:
+        # Fetch all users (separate session for user list)
+        async with AsyncSessionLocal() as list_session:
+            result = await list_session.execute(select(User))
             users = result.scalars().all()
-            
-            logger.info("users_fetched", user_count=len(users))
-            
-            total_processed = 0
-            total_errors = 0
-            
-            # Process each user
-            for user in users:
-                try:
-                    # Sync user emails
+        
+        logger.info("users_fetched", user_count=len(users))
+        total_processed = 0
+        total_errors = 0
+        
+        # Process each user with a fresh session (avoids long-lived connections)
+        for user in users:
+            try:
+                async with AsyncSessionLocal() as session:
                     sync_result = await sync_user_emails(user, session)
                     
-                    # Create sync log entry
                     sync_log = SyncLog(
                         user_id=user.id,
                         status="success" if sync_result['success'] else "failed",
@@ -245,29 +235,23 @@ async def sync_all_users():
                     )
                     session.add(sync_log)
                     await session.commit()
-                    
-                    if sync_result['success']:
-                        total_processed += 1
-                    else:
-                        total_errors += 1
-                    
-                    logger.info(
-                        "user_sync_completed",
-                        user_id=str(user.id),
-                        success=sync_result['success'],
-                        emails_processed=sync_result['emails_processed']
-                    )
-                    
-                except Exception as e:
-                    # Log error but continue with other users
-                    logger.error(
-                        "user_sync_error",
-                        user_id=str(user.id),
-                        error=str(e)
-                    )
-                    
-                    # Try to create error log entry
-                    try:
+                
+                if sync_result['success']:
+                    total_processed += 1
+                else:
+                    total_errors += 1
+                
+                logger.info(
+                    "user_sync_completed",
+                    user_id=str(user.id),
+                    success=sync_result['success'],
+                    emails_processed=sync_result['emails_processed']
+                )
+                
+            except Exception as e:
+                logger.error("user_sync_error", user_id=str(user.id), error=str(e))
+                try:
+                    async with AsyncSessionLocal() as session:
                         sync_log = SyncLog(
                             user_id=user.id,
                             status="failed",
@@ -276,32 +260,19 @@ async def sync_all_users():
                         )
                         session.add(sync_log)
                         await session.commit()
-                    except Exception as log_error:
-                        logger.error(
-                            "sync_log_creation_failed",
-                            user_id=str(user.id),
-                            error=str(log_error)
-                        )
-                    
-                    total_errors += 1
-                    # Continue with next user
-                    continue
-            
-            logger.info(
-                "sync_all_users_completed",
-                total_users=len(users),
-                successful=total_processed,
-                failed=total_errors
-            )
-            
-        except Exception as e:
-            logger.error(
-                "sync_all_users_failed",
-                error=str(e)
-            )
-        finally:
-            # Ensure session is closed
-            await session.close()
+                except Exception as log_error:
+                    logger.error("sync_log_creation_failed", user_id=str(user.id), error=str(log_error))
+                total_errors += 1
+        
+        logger.info(
+            "sync_all_users_completed",
+            total_users=len(users),
+            successful=total_processed,
+            failed=total_errors
+        )
+        
+    except Exception as e:
+        logger.error("sync_all_users_failed", error=str(e))
 
 
 def start_scheduler():

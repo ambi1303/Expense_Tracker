@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import api from '../services/api';
+import api, { API_BASE_URL } from '../services/api';
 import { User } from '../types';
 
 interface AuthContextType {
@@ -28,7 +28,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   const login = () => {
-    window.location.href = 'http://localhost:8000/auth/google';
+    window.location.href = `${API_BASE_URL.replace(/\/$/, '')}/auth/google`;
   };
 
   const logout = async () => {

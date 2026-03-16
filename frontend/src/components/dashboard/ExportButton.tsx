@@ -3,10 +3,12 @@ import api from '../../services/api';
 
 const ExportButton: React.FC = () => {
   const [exporting, setExporting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const handleExport = async () => {
     try {
       setExporting(true);
+      setError(null);
       const response = await api.get('/transactions/export', {
         responseType: 'blob',
       });
@@ -19,14 +21,16 @@ const ExportButton: React.FC = () => {
       link.click();
       link.remove();
       window.URL.revokeObjectURL(url);
-    } catch (error) {
-      console.error('Export failed:', error);
+    } catch (err: any) {
+      const message = err.response?.data?.detail || 'Export failed. Please try again.';
+      setError(message);
     } finally {
       setExporting(false);
     }
   };
 
   return (
+    <div>
     <button
       onClick={handleExport}
       disabled={exporting}
@@ -67,6 +71,10 @@ const ExportButton: React.FC = () => {
         </span>
       )}
     </button>
+    {error && (
+      <p className="mt-2 text-sm text-red-600 dark:text-red-400">{error}</p>
+    )}
+    </div>
   );
 };
 

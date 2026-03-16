@@ -1,8 +1,10 @@
 import React from 'react';
 import { useAuth } from '../context/AuthContext';
+import { API_BASE_URL } from '../services/api';
 
 const Login: React.FC = () => {
   const { login } = useAuth();
+  const authUrl = `${API_BASE_URL.replace(/\/$/, '')}/auth/google`;
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-primary-500 to-primary-700 dark:from-gray-900 dark:to-gray-800">
@@ -18,9 +20,10 @@ const Login: React.FC = () => {
           </div>
 
           <div className="space-y-6">
-            <button
-              onClick={login}
-              className="w-full flex items-center justify-center px-6 py-3 bg-white dark:bg-gray-700 border-2 border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors shadow-sm"
+            <a
+              href={authUrl}
+              onClick={(e) => { e.preventDefault(); login(); }}
+              className="w-full flex items-center justify-center px-6 py-3 bg-white dark:bg-gray-700 border-2 border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors shadow-sm block"
             >
               <svg className="w-6 h-6 mr-3" viewBox="0 0 24 24">
                 <path
@@ -43,7 +46,7 @@ const Login: React.FC = () => {
               <span className="text-gray-700 dark:text-gray-200 font-medium">
                 Continue with Google
               </span>
-            </button>
+            </a>
 
             <div className="text-center text-sm text-gray-500 dark:text-gray-400">
               <p>By continuing, you agree to allow access to your Gmail</p>

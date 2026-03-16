@@ -14,7 +14,8 @@ import uuid
 from app.database import get_db
 from app.models.user import User
 from app.auth.oauth import initiate_oauth_flow, handle_oauth_callback
-from app.auth.jwt_handler import create_session_token
+from app.auth.jwt_handler import create_session_token, verify_session_token
+from jose import JWTError
 from app.auth.encryption import encrypt_refresh_token
 from app.auth.middleware import get_current_user
 from app.schemas.user import UserResponse
@@ -37,6 +38,8 @@ async def set_session_cookie(
     HTTPOnly cookie. This works around the issue of cookies not persisting
     across domain redirects.
     
+    Validates the JWT token before setting to prevent session hijacking.
+    
     Args:
         token: JWT session token.
         response: FastAPI response object for setting cookies.
@@ -44,8 +47,16 @@ async def set_session_cookie(
     Returns:
         Success message.
     """
+    try:
+        verify_session_token(token)
+    except (JWTError, ValueError):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired token"
+        )
+
     is_production = os.getenv("ENVIRONMENT", "development") == "production"
-    
+
     response.set_cookie(
         key="session_token",
         value=token,
@@ -155,23 +166,15 @@ async def google_callback(
         
         # Generate JWT session token
         session_token = create_session_token(str(user.id), user.email)
-        
-        # Create redirect response to frontend dashboard
+
+        # Redirect to frontend auth-complete with token in URL.
+        # Cookie cannot persist across cross-origin redirect (backend -> frontend),
+        # so frontend calls /auth/set-session to set the cookie.
         frontend_url = os.getenv("FRONTEND_URL", "http://localhost:5173")
-        redirect_response = RedirectResponse(url=f"{frontend_url}/dashboard")
-        
-        # Set JWT as HTTPOnly cookie directly on response (not in URL)
-        is_production = os.getenv("ENVIRONMENT", "development") == "production"
-        redirect_response.set_cookie(
-            key="session_token",
-            value=session_token,
-            httponly=True,
-            secure=is_production,
-            samesite="lax",
-            max_age=7 * 24 * 60 * 60,
-            path="/"
+        redirect_response = RedirectResponse(
+            url=f"{frontend_url}/auth/complete?token={session_token}"
         )
-        
+
         return redirect_response
         
     except ValueError as e:
@@ -230,9 +233,10 @@ async def logout(response: Response):
     Returns:
         LogoutResponse: Logout confirmation message.
     """
-    # Clear the session cookie
+    # Clear the session cookie (path must match how it was set)
     response.delete_cookie(
         key="session_token",
+        path="/",
         httponly=True,
         secure=os.getenv("ENVIRONMENT", "development") == "production",
         samesite="lax"
