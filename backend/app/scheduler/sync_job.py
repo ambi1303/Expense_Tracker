@@ -6,9 +6,9 @@ Gmail emails for all active users, extracting transaction data and storing it
 in the database.
 """
 
-from typing import List, Dict
+from typing import List, Dict, Optional
 from uuid import UUID
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_
 from asyncio import Lock
@@ -47,18 +47,26 @@ async def get_user_sync_lock(user_id: UUID) -> Lock:
         return _user_sync_locks[user_id]
 
 
-async def sync_user_emails(user: User, session: AsyncSession) -> dict:
+async def sync_user_emails(
+    user: User,
+    session: AsyncSession,
+    from_date: Optional[str] = None,
+    full_sync: bool = False
+) -> dict:
     """
     Sync emails for a single user with incremental sync and concurrency control.
-    
-    Fetches new transaction emails from Gmail since last successful sync,
-    parses them, and stores transactions in the database. Handles token refresh
-    and duplicate filtering. Uses per-user locks to prevent concurrent syncs.
-    
+
+    Fetches transaction emails from Gmail, parses them, and stores transactions
+    in the database. By default uses last successful sync time. Can override with
+    from_date (YYYY-MM-DD) or full_sync=True to fetch all emails (e.g. after
+    database wipe).
+
     Args:
         user: User object to sync emails for.
         session: Database session.
-        
+        from_date: Optional date string (YYYY-MM-DD). If set, fetch emails from this date.
+        full_sync: If True, fetch all emails (no date filter). Use after clearing data.
+
     Returns:
         Dict with sync results: {
             'success': bool,
@@ -89,22 +97,31 @@ async def sync_user_emails(user: User, session: AsyncSession) -> dict:
             
             logger.info("access_token_refreshed", user_id=str(user.id))
             
-            # Query last successful sync time for incremental sync
-            last_sync_query = select(SyncLog.created_at).where(
-                and_(
-                    SyncLog.user_id == user.id,
-                    SyncLog.status == "success"
-                )
-            ).order_by(SyncLog.created_at.desc()).limit(1)
-            result = await session.execute(last_sync_query)
-            last_sync_time = result.scalar_one_or_none()
-            
-            logger.info("last_sync_time_queried",
-                       user_id=str(user.id),
-                       last_sync_time=last_sync_time)
-            
-            # Fetch new emails from Gmail (pass last_sync_time for incremental sync)
-            emails = await fetch_transaction_emails(access_token, last_sync_time)
+            # Determine which date to use for Gmail fetch
+            if full_sync:
+                sync_time_used = None
+                logger.info("full_sync_requested", user_id=str(user.id))
+            elif from_date:
+                try:
+                    parsed = datetime.strptime(from_date.strip(), "%Y-%m-%d")
+                    sync_time_used = parsed.replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=timezone.utc)
+                    logger.info("from_date_override", user_id=str(user.id), from_date=from_date)
+                except ValueError:
+                    logger.warning("invalid_from_date", from_date=from_date)
+                    sync_time_used = None
+            else:
+                last_sync_query = select(SyncLog.created_at).where(
+                    and_(
+                        SyncLog.user_id == user.id,
+                        SyncLog.status == "success"
+                    )
+                ).order_by(SyncLog.created_at.desc()).limit(1)
+                result = await session.execute(last_sync_query)
+                sync_time_used = result.scalar_one_or_none()
+                logger.info("last_sync_time_queried", user_id=str(user.id), last_sync_time=sync_time_used)
+
+            # Fetch emails from Gmail
+            emails = await fetch_transaction_emails(access_token, sync_time_used)
             
             logger.info(
                 "emails_fetched",

@@ -55,6 +55,8 @@ class SyncLogResponse(BaseModel):
 @limiter.limit("3/minute")  # Max 3 syncs per minute per user
 async def trigger_manual_sync(
     request: Request,  # Required for rate limiter
+    from_date: str | None = Query(None, description="Sync emails from this date (YYYY-MM-DD). Use to re-fetch after data deletion."),
+    full_sync: bool = Query(False, description="If true, fetch all emails (no date filter). Use after clearing database."),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
@@ -71,11 +73,21 @@ async def trigger_manual_sync(
         SyncResponse with sync results including number of emails processed,
         transactions created, and any error messages.
     """
-    logger.info("manual_sync_triggered", user_id=str(current_user.id))
-    
+    logger.info(
+        "manual_sync_triggered",
+        user_id=str(current_user.id),
+        from_date=from_date,
+        full_sync=full_sync
+    )
+
     try:
         # Perform sync for current user
-        sync_result = await sync_user_emails(current_user, db)
+        sync_result = await sync_user_emails(
+            current_user,
+            db,
+            from_date=from_date,
+            full_sync=full_sync
+        )
         
         # Create sync log entry
         sync_log = SyncLog(

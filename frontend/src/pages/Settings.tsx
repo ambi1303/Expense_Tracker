@@ -8,21 +8,49 @@ const Settings: React.FC = () => {
   const { user, logout } = useAuth();
   const [syncLogs, setSyncLogs] = useState<SyncLog[]>([]);
   const [loading, setLoading] = useState(true);
+  const [syncFromDate, setSyncFromDate] = useState('');
+  const [syncing, setSyncing] = useState(false);
+  const [syncMessage, setSyncMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  const fetchSyncHistory = async () => {
+    try {
+      const response = await api.get('/sync/history?limit=10');
+      setSyncLogs(response.data);
+    } catch (error) {
+      console.error('Failed to fetch sync history:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
-    const fetchSyncHistory = async () => {
-      try {
-        const response = await api.get('/sync/history?limit=10');
-        setSyncLogs(response.data);
-      } catch (error) {
-        console.error('Failed to fetch sync history:', error);
-      } finally {
-        setLoading(false);
-      }
-    };
-
     fetchSyncHistory();
   }, []);
+
+  const runSync = async (params?: { from_date?: string; full_sync?: boolean }) => {
+    try {
+      setSyncing(true);
+      setSyncMessage(null);
+      const config = params?.full_sync
+        ? { params: { full_sync: true } }
+        : params?.from_date
+          ? { params: { from_date: params.from_date } }
+          : {};
+      const res = await api.post('/sync/manual', null, config);
+      setSyncMessage({
+        type: 'success',
+        text: res.data.message || `Processed ${res.data.emails_processed} emails, created ${res.data.transactions_created} transactions`,
+      });
+      fetchSyncHistory();
+    } catch (e: any) {
+      setSyncMessage({
+        type: 'error',
+        text: e.response?.data?.detail || e.response?.data?.error || 'Sync failed',
+      });
+    } finally {
+      setSyncing(false);
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -48,6 +76,71 @@ const Settings: React.FC = () => {
               Account created: {user?.created_at && format(new Date(user.created_at), 'MMMM dd, yyyy')}
             </p>
           </div>
+        </div>
+      </div>
+
+      {/* Email sync options */}
+      <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6 border border-gray-200 dark:border-gray-700">
+        <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-4">
+          Email Sync Options
+        </h2>
+        <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+          If you deleted data or need to re-fetch from a specific date, use these options.
+        </p>
+        <div className="space-y-4">
+          <div className="flex flex-wrap gap-3 items-center">
+            <button
+              onClick={() => runSync()}
+              disabled={syncing}
+              className="px-4 py-2 bg-primary-600 hover:bg-primary-700 text-white rounded-lg disabled:opacity-50"
+            >
+              {syncing ? 'Syncing...' : 'Sync Now (incremental)'}
+            </button>
+            <span className="text-sm text-gray-500 dark:text-gray-400">
+              Fetches new emails since last sync
+            </span>
+          </div>
+          <div className="flex flex-wrap gap-3 items-center">
+            <input
+              type="date"
+              value={syncFromDate}
+              onChange={(e) => setSyncFromDate(e.target.value)}
+              className="border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
+            />
+            <button
+              onClick={() => syncFromDate && runSync({ from_date: syncFromDate })}
+              disabled={syncing || !syncFromDate}
+              className="px-4 py-2 bg-gray-600 hover:bg-gray-700 text-white rounded-lg disabled:opacity-50"
+            >
+              {syncing ? 'Syncing...' : 'Sync from this date'}
+            </button>
+            <span className="text-sm text-gray-500 dark:text-gray-400">
+              Re-fetch emails from a specific date (e.g. after clearing data)
+            </span>
+          </div>
+          <div className="flex flex-wrap gap-3 items-center">
+            <button
+              onClick={() => runSync({ full_sync: true })}
+              disabled={syncing}
+              className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-lg disabled:opacity-50"
+            >
+              {syncing ? 'Syncing...' : 'Full re-sync (all emails)'}
+            </button>
+            <span className="text-sm text-gray-500 dark:text-gray-400">
+              Fetches all transaction emails from Gmail (use after deleting all data)
+            </span>
+          </div>
+          {syncMessage && (
+            <p
+              className={`text-sm ${
+                syncMessage.type === 'error'
+                  ? 'text-red-600 dark:text-red-400'
+                  : 'text-green-600 dark:text-green-400'
+              }`}
+            >
+              {syncMessage.text}
+            </p>
+          )}
         </div>
       </div>
 

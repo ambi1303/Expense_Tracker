@@ -1,4 +1,5 @@
 import React from 'react';
+import { Link } from 'react-router-dom';
 import { useDashboardData } from '../hooks/useDashboardData';
 import SummaryCards from '../components/dashboard/SummaryCards';
 import MonthlyChart from '../components/dashboard/MonthlyChart';
@@ -56,7 +57,7 @@ const Dashboard: React.FC = () => {
             No transactions yet
           </p>
           <p className="text-blue-600 dark:text-blue-300 mb-4">
-            Click "Sync Now" to fetch your transaction emails from Gmail
+            Go to <Link to="/import" className="underline font-medium">Add Data</Link> to sync from Gmail or upload statements (PDF/CSV)
           </p>
         </div>
       )}

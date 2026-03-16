@@ -171,12 +171,15 @@ def handle_oauth_callback(code: str) -> Dict[str, str]:
         raise ValueError("Authorization code cannot be empty")
     
     config = get_oauth_config()
-    
+    cid = config["client_id"].strip()
+    csecret = config["client_secret"].strip()
+    _oauth_logger.info("oauth_client_check", client_id_ends_with=cid[-25:] if len(cid) > 25 else "***", client_id_len=len(cid), client_secret_len=len(csecret))
+
     # Create OAuth flow configuration
     client_config = {
         "web": {
-            "client_id": config["client_id"],
-            "client_secret": config["client_secret"],
+            "client_id": cid,
+            "client_secret": csecret,
             "auth_uri": "https://accounts.google.com/o/oauth2/auth",
             "token_uri": "https://oauth2.googleapis.com/token",
             "redirect_uris": [config["redirect_uri"]]

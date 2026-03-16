@@ -7,6 +7,7 @@ import Login from './pages/Login';
 import AuthComplete from './pages/AuthComplete';
 import Dashboard from './pages/Dashboard';
 import Transactions from './pages/Transactions';
+import Import from './pages/Import';
 import Settings from './pages/Settings';
 
 const App: React.FC = () => {
@@ -40,6 +41,16 @@ const App: React.FC = () => {
               <ProtectedRoute>
                 <Layout>
                   <Transactions />
+                </Layout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/import"
+            element={
+              <ProtectedRoute>
+                <Layout>
+                  <Import />
                 </Layout>
               </ProtectedRoute>
             }

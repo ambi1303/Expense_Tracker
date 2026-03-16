@@ -38,6 +38,9 @@ python-dotenv==1.0.0
 beautifulsoup4==4.12.2
 lxml>=5.3.0  # 5.x has Python 3.13 wheels
 
+# Statement parsing (PDF, CSV)
+pdfplumber>=0.10.0
+
 # Rate Limiting
 slowapi==0.1.9
 

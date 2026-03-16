@@ -17,6 +17,7 @@ from app.routes import auth
 from app.routes import transactions
 from app.routes import analytics
 from app.routes import sync
+from app.routes import statements
 
 # Configure structured logging (dev: human-friendly console; prod: JSON)
 _is_prod = os.getenv("ENVIRONMENT", "development") == "production"
@@ -88,6 +89,10 @@ app = FastAPI(
             "description": "Gmail synchronization and email processing"
         },
         {
+            "name": "Statements",
+            "description": "Upload bank/credit card statements (PDF, CSV) for analysis"
+        },
+        {
             "name": "Health",
             "description": "System health and diagnostic endpoints"
         }
@@ -109,6 +114,7 @@ app.include_router(auth.router)
 app.include_router(transactions.router)
 app.include_router(analytics.router)
 app.include_router(sync.router)
+app.include_router(statements.router)
 
 # Wire SlowAPI rate limiter (required for @limiter.limit decorators)
 from slowapi import _rate_limit_exceeded_handler
